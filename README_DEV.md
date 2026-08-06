@@ -80,6 +80,26 @@ SwarmUI's current server defaults apply):
 Actual values for this environment are in git-ignored `.local/.env` and
 `.local/devenv.md` (endpoints, chosen model, quirks).
 
+## Agent instruction: no S3 configured
+
+If `AGFORGE_S3_*` is unset in `.local/.env` and the user's prompt names no
+alternative storage, do not improvise a workaround. Instead propose
+starting the `pj-clusterintent` devenv MinIO and setting it up:
+
+1. Start MinIO from `pj-clusterintent/devenv/` (`docker compose up -d`).
+2. Using the root credentials from `pj-clusterintent/devenv/.env`
+   (`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`):
+   - `mc mb <alias>/agforge`
+   - create a policy `agforge-rw` scoped to the `agforge` bucket only
+   - create a user `agforge` with that policy attached
+3. Record the endpoint/access key/secret key in `agforge/.local/.env`
+   (`AGFORGE_S3_ENDPOINT`/`AGFORGE_S3_ACCESS_KEY`/`AGFORGE_S3_SECRET_KEY`).
+
+Do not reuse the `nctl` user's key for this — its policy (`nctl-outbox-rw`)
+is scoped to the `nctl-outbox` bucket only, so bucket creation and any
+other-bucket access with it is rejected (`Access Denied`). That dead end
+already cost time once (see problem.md #3).
+
 ## Hard rules
 
 - Never commit endpoints, hostnames, credentials, or generated images.
