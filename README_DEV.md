@@ -20,6 +20,7 @@ this time should be one command next time.
 ```sh
 scripts/generate.sh "a prompt"
 scripts/generate.sh --ttl 240 "a prompt"   # URL lifetime in minutes (default 60)
+scripts/generate.sh --width 256 --height 256 "a prompt"   # per-request override
 # stderr: local:<path to the downloaded image under .local/out/>
 # stdout final line: time-limited presigned download URL
 ```
@@ -30,20 +31,49 @@ the hood: SwarmUI HTTP API (`GetNewSession` → `GenerateText2Image`) →
 download image to `.local/out/` → upload to the `agforge` bucket on MinIO →
 presigned GET URL.
 
+## Generation parameters
+
+SwarmUI generation parameters (`model`, `width`, `height`, `steps`,
+`cfgscale`, `seed`) are resolved by merging three layers, later wins:
+
+1. `params/defaults.toml` — versioned sample values for the optional
+   params. Committed to the repo; rough values are fine, tune freely.
+2. `.local/.env` — this environment's actual values (see keys below).
+3. Per-request CLI flags (`--model`, `--width`, `--height`, `--steps`,
+   `--cfgscale`, `--seed`) — highest priority, for one-off overrides.
+
+`model` is the only required parameter — SwarmUI 0.9.7.4 rejects requests
+without it ("No model input given"). It's deliberately absent from
+`params/defaults.toml` (which models are installed varies per SwarmUI
+instance); set it via `AGFORGE_SWARMUI_MODEL` in `.local/.env` or
+`--model`. Valid names come from `POST /API/ListModels` on the running
+SwarmUI instance. If `model` is unresolved from all three layers, the
+script fails fast with a message pointing at all three places to set it.
+
+All other params fall back to SwarmUI's current server defaults if unset
+in every layer.
+
 ## `.local/.env` keys
 
 Required:
 
 ```sh
 AGFORGE_SWARMUI_URL=       # SwarmUI base URL
-AGFORGE_SWARMUI_MODEL=     # model name from /API/ListModels — SwarmUI rejects calls without it
 AGFORGE_S3_ENDPOINT=       # MinIO endpoint; must be the hostname recipients can reach, never localhost
 AGFORGE_S3_BUCKET=agforge  # dedicated bucket; never write to nctl-outbox
 AGFORGE_S3_ACCESS_KEY=
 AGFORGE_S3_SECRET_KEY=
 ```
 
-Optional (otherwise SwarmUI's current server defaults apply):
+Effectively required (no default in `params/defaults.toml`), but can be set
+via `--model` instead of `.env`:
+
+```sh
+AGFORGE_SWARMUI_MODEL=     # model name from /API/ListModels; no default exists in defaults.toml
+```
+
+Optional (see `params/defaults.toml` for sample values, otherwise
+SwarmUI's current server defaults apply):
 `AGFORGE_SWARMUI_WIDTH`, `AGFORGE_SWARMUI_HEIGHT`, `AGFORGE_SWARMUI_STEPS`,
 `AGFORGE_SWARMUI_CFGSCALE`, `AGFORGE_SWARMUI_SEED`.
 
@@ -58,5 +88,5 @@ Actual values for this environment are in git-ignored `.local/.env` and
 
 ## Related docs
 
-- Episode plan/reports: `pj-agdev/devdocs/episodes/agforge/begin/`
+- Episode plan/reports: `pj-agdev/devdocs/ent-episodes/swarmui-flow/`
 - MinIO reuse context: `pj-clusterintent` devenv (`nctl.toml` `[storage]`).
