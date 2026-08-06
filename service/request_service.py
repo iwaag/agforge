@@ -59,7 +59,15 @@ def run_job(request_id: str, desire: str) -> None:
         return
 
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "generate.sh failed with no output").strip()
+        # The last non-empty stderr line is the actual error (sys.exit message
+        # or the final exception line of a traceback) — far more readable in a
+        # caller's UI than a mid-traceback tail.
+        stderr_lines = [line for line in (result.stderr or "").splitlines() if line.strip()]
+        detail = (
+            stderr_lines[-1].strip()
+            if stderr_lines
+            else (result.stdout or "generate.sh failed with no output").strip()
+        )
         with jobs_lock:
             jobs[request_id] = {"status": "failed", "detail": detail[-STDERR_TAIL_CHARS:]}
         return
