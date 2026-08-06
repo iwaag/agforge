@@ -1,0 +1,17 @@
+# Versioned sample defaults for optional SwarmUI generation parameters.
+#
+# `model` is intentionally NOT here: it is environment-specific (which
+# checkpoints are installed varies per SwarmUI instance) and required for
+# every request, so its real value belongs in `.local/.env`
+# (`AGFORGE_SWARMUI_MODEL`) or a per-request `--model` flag, never here.
+# See README_DEV.md for the full merge order.
+#
+# Values below are rough starting points, not tuned recommendations — edit
+# freely.
+
+[defaults]
+width = 512
+height = 512
+steps = 20
+cfgscale = 7.0
+seed = -1

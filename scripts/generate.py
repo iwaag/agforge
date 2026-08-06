@@ -5,16 +5,20 @@
 """Generate one image via SwarmUI, upload it to MinIO, print a download URL.
 
 Usage:
-    uv run scripts/generate.py [--ttl MINUTES] "a prompt"
+    uv run scripts/generate.py [--ttl MINUTES] [--model NAME] [--width N]
+        [--height N] [--steps N] [--cfgscale N] [--seed N] "a prompt"
 
 Prints the local file path, then the presigned download URL as the FINAL
-line of output. Reads configuration from `.local/.env` (see README_DEV.md
-for keys). Generation parameters beyond the prompt and model are left unset
-on purpose so the settings currently configured in the SwarmUI web UI apply.
+line of output. Reads S3 configuration from `.local/.env` (see
+README_DEV.md for keys). Generation parameters (model/width/height/steps/
+cfgscale/seed) are resolved by merging three layers, later wins:
+`params/defaults.toml` -> `.local/.env` -> CLI flags. `model` is the only
+one that is required.
 """
 
 import argparse
 import sys
+import tomllib
 import uuid
 from datetime import date
 from pathlib import Path
@@ -26,6 +30,20 @@ DEFAULT_TTL_MINUTES = 60
 
 AGFORGE_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = AGFORGE_ROOT / ".local" / "out"
+DEFAULTS_FILE = AGFORGE_ROOT / "params" / "defaults.toml"
+
+# Generation params, later layer wins: defaults.toml -> .local/.env -> CLI
+# flags. The running SwarmUI (0.9.7.4) requires `model`; the rest fall back
+# to the server's current UI defaults when unset.
+PARAM_NAMES = ["model", "width", "height", "steps", "cfgscale", "seed"]
+ENV_KEYS = {
+    "model": "AGFORGE_SWARMUI_MODEL",
+    "width": "AGFORGE_SWARMUI_WIDTH",
+    "height": "AGFORGE_SWARMUI_HEIGHT",
+    "steps": "AGFORGE_SWARMUI_STEPS",
+    "cfgscale": "AGFORGE_SWARMUI_CFGSCALE",
+    "seed": "AGFORGE_SWARMUI_SEED",
+}
 
 
 def load_env() -> dict[str, str]:
@@ -41,29 +59,44 @@ def load_env() -> dict[str, str]:
     return env
 
 
-# Optional generation params, read from .local/.env when present. The running
-# SwarmUI (0.9.7.4) requires at least `model`; everything else falls back to
-# the server's current UI defaults.
-ENV_PARAMS = {
-    "AGFORGE_SWARMUI_MODEL": "model",
-    "AGFORGE_SWARMUI_WIDTH": "width",
-    "AGFORGE_SWARMUI_HEIGHT": "height",
-    "AGFORGE_SWARMUI_STEPS": "steps",
-    "AGFORGE_SWARMUI_CFGSCALE": "cfgscale",
-    "AGFORGE_SWARMUI_SEED": "seed",
-}
+def load_defaults() -> dict[str, str]:
+    if not DEFAULTS_FILE.exists():
+        return {}
+    with DEFAULTS_FILE.open("rb") as f:
+        data = tomllib.load(f)
+    return {k: str(v) for k, v in data.get("defaults", {}).items()}
 
 
-def generate_image(swarmui_url: str, prompt: str, env: dict[str, str]) -> Path:
+def resolve_params(
+    defaults: dict[str, str], env: dict[str, str], cli_args: argparse.Namespace
+) -> dict[str, str]:
+    params = dict(defaults)
+    for name, env_key in ENV_KEYS.items():
+        if env.get(env_key):
+            params[name] = env[env_key]
+    for name in PARAM_NAMES:
+        cli_value = getattr(cli_args, name)
+        if cli_value is not None:
+            params[name] = str(cli_value)
+    if not params.get("model"):
+        sys.exit(
+            "model is required but not set anywhere: not in "
+            f"{DEFAULTS_FILE.relative_to(AGFORGE_ROOT)}, not as "
+            "AGFORGE_SWARMUI_MODEL in .local/.env, and no --model flag. "
+            "List valid names with POST /API/ListModels against your "
+            "SwarmUI instance."
+        )
+    return params
+
+
+def generate_image(swarmui_url: str, prompt: str, params: dict[str, str]) -> Path:
     base = swarmui_url.rstrip("/")
     session = requests.post(f"{base}/API/GetNewSession", json={}, timeout=30)
     session.raise_for_status()
     session_id = session.json()["session_id"]
 
     payload = {"session_id": session_id, "prompt": prompt, "images": 1}
-    for env_key, param in ENV_PARAMS.items():
-        if env.get(env_key):
-            payload[param] = env[env_key]
+    payload.update(params)
     resp = requests.post(
         f"{base}/API/GenerateText2Image",
         json=payload,
@@ -134,6 +167,12 @@ def main() -> None:
         metavar="MINUTES",
         help=f"presigned URL lifetime in minutes (default {DEFAULT_TTL_MINUTES})",
     )
+    parser.add_argument("--model", help="overrides defaults.toml / .local/.env")
+    parser.add_argument("--width", help="overrides defaults.toml / .local/.env")
+    parser.add_argument("--height", help="overrides defaults.toml / .local/.env")
+    parser.add_argument("--steps", help="overrides defaults.toml / .local/.env")
+    parser.add_argument("--cfgscale", help="overrides defaults.toml / .local/.env")
+    parser.add_argument("--seed", help="overrides defaults.toml / .local/.env")
     args = parser.parse_args()
     if not args.prompt.strip():
         parser.error("prompt is empty")
@@ -142,7 +181,8 @@ def main() -> None:
     swarmui_url = env.get("AGFORGE_SWARMUI_URL")
     if not swarmui_url:
         sys.exit("AGFORGE_SWARMUI_URL missing from .local/.env")
-    local_path = generate_image(swarmui_url, args.prompt, env)
+    params = resolve_params(load_defaults(), env, args)
+    local_path = generate_image(swarmui_url, args.prompt, params)
     print(f"local: {local_path}", file=sys.stderr)
     url = upload_and_presign(env, local_path, args.ttl)
     print(url)
