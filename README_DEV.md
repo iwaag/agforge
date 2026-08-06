@@ -9,6 +9,8 @@ this time should be one command next time.
 
 - `scripts/` — pipeline scripts. The main deliverable is a one-command
   prompt → image → S3 upload → presigned download URL pipeline.
+- `service/` — the request service: an intent-level HTTP API wrapping the
+  same pipeline for other agents/apps (currently agdevworld).
 - `.local/` — git-ignored. All endpoints, hostnames, credentials, and local
   notes live here, never in the repo.
   - `.local/devenv.md` — local-only notes: actual endpoints, quirks observed.
@@ -30,6 +32,36 @@ scripts/generate.sh --width 256 --height 256 "a prompt"   # per-request override
 the hood: SwarmUI HTTP API (`GetNewSession` → `GenerateText2Image`) →
 download image to `.local/out/` → upload to the `agforge` bucket on MinIO →
 presigned GET URL.
+
+## Request service
+
+An intent-level HTTP API over the pipeline: callers send a desire (prompt
+text) and poll for result artifacts. Callers know nothing about models,
+sizes, or SwarmUI — everything generation-specific is resolved here
+(`params/defaults.toml` / `.local/.env`).
+
+```sh
+service/serve.sh          # listens on :8092 (override: AGFORGE_SERVICE_PORT)
+```
+
+Contract:
+
+```
+POST /api/requests      { "desire": "<prompt text>" }
+                        -> 202 { "request_id": "..." }
+GET  /api/requests/{id} -> { "status": "working" | "done" | "failed",
+                             "artifacts": [ { "kind": "image", "url": "<presigned URL>" } ],
+                             "detail": "<human-readable, present on failed>" }
+GET  /healthz           -> { "ok": true }
+```
+
+`kind` lets agforge later return music/video without breaking callers.
+Each request runs `scripts/generate.sh "<desire>"` in a worker thread and
+takes the final stdout line as the presigned URL; a nonzero exit maps to
+`status: "failed"` with the stderr tail in `detail` (no retries). Jobs are
+held **in memory only and vanish on service restart** — pollers of a
+restarted service get 404 and should just re-request. Generation takes tens
+of seconds; poll every few seconds.
 
 ## Generation parameters
 
