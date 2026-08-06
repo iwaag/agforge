@@ -2,22 +2,27 @@
 # requires-python = ">=3.11"
 # dependencies = ["requests", "boto3"]
 # ///
-"""Generate one image via SwarmUI and print its local file path.
+"""Generate one image via SwarmUI, upload it to MinIO, print a download URL.
 
 Usage:
-    uv run scripts/generate.py "a prompt"
+    uv run scripts/generate.py [--ttl MINUTES] "a prompt"
 
-Reads configuration from `.local/.env` (see README_DEV.md for keys).
-Generation parameters beyond the prompt are left unset on purpose so the
-settings currently configured in the SwarmUI web UI apply.
+Prints the local file path, then the presigned download URL as the FINAL
+line of output. Reads configuration from `.local/.env` (see README_DEV.md
+for keys). Generation parameters beyond the prompt and model are left unset
+on purpose so the settings currently configured in the SwarmUI web UI apply.
 """
 
+import argparse
 import sys
 import uuid
 from datetime import date
 from pathlib import Path
 
+import boto3
 import requests
+
+DEFAULT_TTL_MINUTES = 60
 
 AGFORGE_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = AGFORGE_ROOT / ".local" / "out"
@@ -86,15 +91,61 @@ def generate_image(swarmui_url: str, prompt: str, env: dict[str, str]) -> Path:
     return local_path
 
 
+def upload_and_presign(env: dict[str, str], local_path: Path, ttl_minutes: int) -> str:
+    required = [
+        "AGFORGE_S3_ENDPOINT",
+        "AGFORGE_S3_BUCKET",
+        "AGFORGE_S3_ACCESS_KEY",
+        "AGFORGE_S3_SECRET_KEY",
+    ]
+    missing = [k for k in required if not env.get(k)]
+    if missing:
+        sys.exit(f"missing in .local/.env: {', '.join(missing)}")
+    bucket = env["AGFORGE_S3_BUCKET"]
+    if bucket == "nctl-outbox":
+        sys.exit("refusing to write to the nctl-outbox bucket")
+
+    # endpoint_url is signed into the presigned URL — it must be the hostname
+    # recipients can reach, never localhost.
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=env["AGFORGE_S3_ENDPOINT"],
+        aws_access_key_id=env["AGFORGE_S3_ACCESS_KEY"],
+        aws_secret_access_key=env["AGFORGE_S3_SECRET_KEY"],
+        region_name="us-east-1",
+    )
+    key = f"images/{date.today().isoformat()}/{uuid.uuid4().hex}{local_path.suffix}"
+    content_type = "image/jpeg" if local_path.suffix in (".jpg", ".jpeg") else "image/png"
+    s3.upload_file(str(local_path), bucket, key, ExtraArgs={"ContentType": content_type})
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=ttl_minutes * 60,
+    )
+
+
 def main() -> None:
-    if len(sys.argv) != 2 or not sys.argv[1].strip():
-        sys.exit('usage: uv run scripts/generate.py "a prompt"')
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("prompt", help="text prompt for the image")
+    parser.add_argument(
+        "--ttl",
+        type=int,
+        default=DEFAULT_TTL_MINUTES,
+        metavar="MINUTES",
+        help=f"presigned URL lifetime in minutes (default {DEFAULT_TTL_MINUTES})",
+    )
+    args = parser.parse_args()
+    if not args.prompt.strip():
+        parser.error("prompt is empty")
+
     env = load_env()
     swarmui_url = env.get("AGFORGE_SWARMUI_URL")
     if not swarmui_url:
         sys.exit("AGFORGE_SWARMUI_URL missing from .local/.env")
-    local_path = generate_image(swarmui_url, sys.argv[1], env)
-    print(local_path)
+    local_path = generate_image(swarmui_url, args.prompt, env)
+    print(f"local: {local_path}", file=sys.stderr)
+    url = upload_and_presign(env, local_path, args.ttl)
+    print(url)
 
 
 if __name__ == "__main__":
