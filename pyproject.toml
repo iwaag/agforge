@@ -1,0 +1,14 @@
+[project]
+name = "agforge"
+version = "0.1.0"
+description = "Asset-generation workspace: prompt-only request service over SwarmUI"
+requires-python = ">=3.11"
+# Mirrors the service scripts' inline metadata so `uv run pytest` can import
+# them; the scripts themselves keep their own PEP 723 blocks.
+dependencies = ["pillow", "boto3", "requests"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
