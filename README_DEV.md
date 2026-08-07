@@ -65,8 +65,8 @@ tens of seconds; poll every few seconds.
 Each request runs a bounded pipeline in a worker thread (whole job budget
 900 s; see `devdocs/episodes/agforge/agentify/` in pj-agdev):
 
-1. **Interpret** (`service/interpret.py`, one `claude -p` one-shot, model
-   pinned `claude-sonnet-5`): extracts the creative prompt and any
+1. **Interpret** (`service/interpret.py`, one LLM one-shot): extracts the
+   creative prompt and any
    quantitative requirements (width/height) out of the desire text, or
    refuses desires agforge cannot honor (wrong medium, absurd dimensions).
    Sizes stated in the desire now *control* generation instead of being
@@ -92,10 +92,21 @@ Failure `detail` prefixes let callers tell classes apart textually:
 - anything else — pipeline/infra error (SwarmUI, S3, ...).
 
 Subjective quality is deliberately not judged here — callers (the coming
-director) own taste; this agent only makes quantitative intent real. The
-interpreter's `claude` binary is resolved via `AGFORGE_CLAUDE_CMD`
-(process env or `.local/.env`) when it is not on PATH; interpreter cost
-(`total_cost_usd`, ~$0.07/request) is logged per job.
+director) own taste; this agent only makes quantitative intent real.
+
+The interpreter has two backends, selected by `AGFORGE_INTERPRET_BACKEND`
+(process env or `.local/.env`, default `claude`):
+
+- `claude`: one `claude -p` shot, model pinned `claude-sonnet-5`. The
+  binary is resolved via `AGFORGE_CLAUDE_CMD` (process env or
+  `.local/.env`) when it is not on PATH. ~$0.07/request.
+- `ollama`: one `/api/generate` call (`format: json`, temperature 0)
+  against an ollama server. `AGFORGE_OLLAMA_URL` and
+  `AGFORGE_OLLAMA_MODEL` are required (process env or `.local/.env`);
+  endpoints are configuration, never committed. Zero marginal cost; needs
+  a tool-grade instruct model (see the agentify/ex1 report in pj-agdev).
+
+The backend and per-job cost/duration are logged per job.
 
 ## Tests
 
@@ -158,7 +169,10 @@ SwarmUI's current server defaults apply):
 Service-only, optional:
 
 ```sh
-AGFORGE_CLAUDE_CMD=        # path to the claude binary when not on PATH (interpreter one-shot)
+AGFORGE_INTERPRET_BACKEND= # interpreter backend: claude (default) or ollama
+AGFORGE_CLAUDE_CMD=        # path to the claude binary when not on PATH (claude backend)
+AGFORGE_OLLAMA_URL=        # ollama base URL (required for the ollama backend)
+AGFORGE_OLLAMA_MODEL=      # ollama model name (required for the ollama backend)
 ```
 
 Actual values for this environment are in git-ignored `.local/.env` and

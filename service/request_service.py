@@ -166,7 +166,8 @@ def run_job(request_id: str, desire: str) -> None:
     except interpret.InterpretError as error:
         return fail(request_id, f"interpreter error: {error}")
     log(
-        f"job {request_id}: interpreter cost_usd={meta.get('total_cost_usd')} "
+        f"job {request_id}: interpreter backend={meta.get('backend')} "
+        f"cost_usd={meta.get('total_cost_usd')} "
         f"duration_ms={meta.get('duration_ms')} attempts={meta.get('attempts')}"
     )
     if interpretation["refuse"]:

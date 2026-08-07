@@ -4,8 +4,8 @@
 # ///
 """Interpret a caller's desire into concrete generation parameters.
 
-One LLM one-shot (`claude -p --output-format json`, model pinned) turns free
-desire text into strict JSON the pipeline can act on:
+One LLM one-shot turns free desire text into strict JSON the pipeline can
+act on:
 
     {"prompt": "<cleaned creative prompt>", "width": int|null,
      "height": int|null, "refuse": false}
@@ -19,9 +19,16 @@ CLI (for manual checks): uv run service/interpret.py "<desire>"
 prints the validated JSON on stdout and call metadata (cost, duration) on
 stderr.
 
-The `claude` binary is resolved from AGFORGE_CLAUDE_CMD (process env or
-`.local/.env`), falling back to `claude` on PATH — this machine runs it from
-a VSCode extension bundle, so the real path lives in `.local/.env`.
+Two backends, selected by AGFORGE_INTERPRET_BACKEND (process env or
+`.local/.env`, default `claude`):
+
+- `claude`: `claude -p --output-format json`, model pinned. The binary is
+  resolved from AGFORGE_CLAUDE_CMD (process env or `.local/.env`), falling
+  back to `claude` on PATH — this machine runs it from a VSCode extension
+  bundle, so the real path lives in `.local/.env`.
+- `ollama`: one `/api/generate` call (`format: json`, temperature 0) against
+  a local ollama server. AGFORGE_OLLAMA_URL and AGFORGE_OLLAMA_MODEL are
+  required (process env or `.local/.env`); neither is hardcoded here.
 
 Test hook: AGFORGE_INTERPRET_CMD replaces the whole `claude` invocation with
 an arbitrary command that reads the prompt on stdin and prints claude-style
@@ -34,6 +41,8 @@ import shlex
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 AGFORGE_ROOT = Path(__file__).resolve().parent.parent
@@ -95,19 +104,72 @@ def build_prompt(desire: str) -> str:
     return PROMPT_TEMPLATE.replace("{desire}", desire)
 
 
-def claude_command() -> str:
-    """Path to the claude binary: env var, then `.local/.env`, then PATH."""
-    if os.environ.get("AGFORGE_CLAUDE_CMD"):
-        return os.environ["AGFORGE_CLAUDE_CMD"]
+def local_env(name: str) -> str | None:
+    """Resolve a config value: process env first, then `.local/.env`."""
+    if os.environ.get(name):
+        return os.environ[name]
     env_file = AGFORGE_ROOT / ".local" / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()
-            if line.startswith("AGFORGE_CLAUDE_CMD="):
+            if line.startswith(f"{name}="):
                 value = line.partition("=")[2].strip()
                 if value:
                     return value
-    return "claude"
+    return None
+
+
+def claude_command() -> str:
+    """Path to the claude binary: env var, then `.local/.env`, then PATH."""
+    return local_env("AGFORGE_CLAUDE_CMD") or "claude"
+
+
+def interpret_backend() -> str:
+    """Which LLM backend runs the one-shot: `claude` (default) or `ollama`."""
+    backend = local_env("AGFORGE_INTERPRET_BACKEND") or "claude"
+    if backend not in ("claude", "ollama"):
+        raise InterpretError(f"unknown AGFORGE_INTERPRET_BACKEND: {backend!r}")
+    return backend
+
+
+def run_ollama(prompt: str) -> tuple[str, dict]:
+    """Run the one-shot against ollama and return (result_text, meta).
+
+    The endpoint and model are configuration (`.local/.env` or process env),
+    never hardcoded. Raises InterpretError on missing config, HTTP failure,
+    timeout, or a malformed API response.
+    """
+    url = local_env("AGFORGE_OLLAMA_URL")
+    model = local_env("AGFORGE_OLLAMA_MODEL")
+    if not url or not model:
+        missing = [n for n, v in (("AGFORGE_OLLAMA_URL", url), ("AGFORGE_OLLAMA_MODEL", model)) if not v]
+        raise InterpretError(f"ollama backend selected but not configured: missing {', '.join(missing)}")
+    body = json.dumps({
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0},
+    }).encode()
+    request = urllib.request.Request(
+        f"{url.rstrip('/')}/api/generate", data=body,
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=INTERPRET_TIMEOUT_SECONDS) as response:
+            outer = json.load(response)
+    except TimeoutError:
+        raise InterpretError(f"ollama timed out after {INTERPRET_TIMEOUT_SECONDS}s")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
+        raise InterpretError(f"ollama request failed: {error}")
+    if not isinstance(outer, dict):
+        raise InterpretError("ollama response is not a JSON object")
+    result = outer.get("response")
+    if not isinstance(result, str) or not result.strip():
+        raise InterpretError("ollama returned no result text")
+    meta = {"backend": "ollama", "model": model}
+    if isinstance(outer.get("total_duration"), int):
+        meta["duration_ms"] = outer["total_duration"] // 1_000_000
+    return result, meta
 
 
 def run_llm(prompt: str) -> tuple[str, dict]:
@@ -120,6 +182,8 @@ def run_llm(prompt: str) -> tuple[str, dict]:
     override = os.environ.get("AGFORGE_INTERPRET_CMD")
     if override:
         argv = shlex.split(override)
+    elif interpret_backend() == "ollama":
+        return run_ollama(prompt)
     else:
         argv = [claude_command(), "-p", "--output-format", "json", "--model", INTERPRET_MODEL]
     try:
@@ -144,6 +208,7 @@ def run_llm(prompt: str) -> tuple[str, dict]:
     if not isinstance(outer, dict):
         raise InterpretError(f"interpreter outer JSON is not an object: {proc.stdout[:200]!r}")
     meta = {k: outer[k] for k in ("total_cost_usd", "duration_ms", "is_error") if k in outer}
+    meta["backend"] = "claude" if not override else "override"
     result = outer.get("result")
     if not isinstance(result, str) or not result.strip():
         raise InterpretError("interpreter returned no result text")
