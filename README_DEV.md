@@ -19,8 +19,8 @@ this time should be one command next time.
   pipelines to eliminate the possibility of failure is NOT recommended —
   it wastes the agent's capability and kills the learning loop.
 
-(The current strict interpret→validate→convert pipeline predates this
-policy; it is being reverted toward an agentic run in
+(The request service follows this policy since agentify ex2: one trusted
+agentic run per request; see
 `devdocs/episodes/agforge/agentify/ex2/` in pj-agdev.)
 
 ## What lives where
@@ -80,45 +80,38 @@ tens of seconds; poll every few seconds.
 
 ### The agent path (how a desire becomes an image)
 
-Each request runs a bounded pipeline in a worker thread (whole job budget
-900 s; see `devdocs/episodes/agforge/agentify/` in pj-agdev):
+Each request runs **one trusted agentic run** in a worker thread (whole
+job budget 900 s; see `devdocs/episodes/agforge/agentify/ex2/` in
+pj-agdev):
 
-1. **Interpret** (`service/interpret.py`, one LLM one-shot): extracts the
-   creative prompt and any
-   quantitative requirements (width/height, file format png/jpeg) out of
-   the desire text, or
-   refuses desires agforge cannot honor (wrong medium, absurd dimensions,
-   unsupported file formats).
-   Sizes stated in the desire now *control* generation instead of being
-   passed to the diffusion model as prose. Null size → config defaults
-   (`params/defaults.toml` / `.local/.env`) apply, their intended role.
-2. **Validate** (code): bounds 64–2048, rounding to the nearest multiple
-   of 64 (SD-family requirement); rounding is recorded.
-3. **Generate** (code): `scripts/generate.sh --width/--height` — the
-   unchanged, verified low-level tool, still available directly for
-   humans/scripts.
-4. **Verify** (code, no LLM): the actual pixels and file format of the
-   generated file are checked against the desire. Size mismatch → one
-   retry; a persistent mismatch with the right shape (rounding-induced,
-   single-dimension, or aspect within 2 %) gets a deterministic resize; a
-   format mismatch gets a deterministic conversion (png↔jpeg, alpha
-   flattened for JPEG). Either produces a fresh presigned URL; otherwise
-   the job fails honestly.
+1. **Charter** (`service/charter.md`, filled by `service/agent_run.py`):
+   the desire verbatim plus a concise briefing — what agforge is, how to
+   call `scripts/generate.sh`, size bounds, data-shaping rules, the
+   finish contract, and the budget. The charter is the main artifact the
+   Easier Next Time loop tunes.
+2. **One headless agent run** with a scoped tool allowlist (never
+   skip-permissions). The agent drives generation itself, checks its own
+   output (size, format — the generator tends to emit JPEG regardless of
+   what was asked), post-processes and re-uploads when needed, and
+   authors its own problem report when it cannot comply.
+3. **Lenient outcome parsing**: the runner scans the agent's final
+   output for `RESULT_URL: <presigned url>` / `RESULT_FAILED: <one
+   line>`, tolerating surrounding prose. Neither marker → the job fails
+   with the output tail as `detail`. No retry machinery, no strict-JSON
+   validation.
 
-Failure `detail` prefixes let callers tell classes apart textually:
-
-- `refused: ...` — agforge cannot honor the desire (says why).
-- `unsatisfied: ...` — generation could not be made to match the desire.
-- `interpreter error: ...` — the LLM one-shot itself failed.
-- anything else — pipeline/infra error (SwarmUI, S3, ...).
+Failure `detail` is the agent's own one-line reason (or the runner's
+infra error). The former code-side resize/convert helpers survive as
+uncalled candidate tools in `service/candidate_tools.py` until live runs
+prove they deserve to be offered to the agent.
 
 Subjective quality is deliberately not judged here — callers (the coming
 director) own taste; this agent only makes quantitative intent real.
 
 ### Problem reports (Easier Next Time)
 
-Every `refused`/`unsatisfied` failure — a request agforge could not
-fulfill, as opposed to an infrastructure error — is also recorded as
+When the agent cannot fulfill a desire — as opposed to an infrastructure
+error killing the run — it writes a report at
 
 ```text
 .local/problems/<UTC stamp>-<request_id[:8]>/problem.md
@@ -127,26 +120,31 @@ fulfill, as opposed to an infrastructure error — is also recorded as
 This is the raw inbox of the Easier Next Time loop: a human and an agent
 review these reports together, decide a fix or a capability change, then
 delete or archive the folder. Only the path rule is fixed — the content
-should ideally be the agent explaining in its own words what was asked and
-why it could not comply (today's implementation still writes a fixed
-template with the verbatim desire and failure detail; ex2 hands authorship
-to the agent). Reports are local-only (git-ignored) and never surfaced to callers
-beyond the normal failure `detail`. Tests override the root with
-`AGFORGE_PROBLEMS_DIR`.
+is the agent explaining **in its own words** what was asked, what it
+tried, and why it could not comply. Reports are local-only (git-ignored)
+and never surfaced to callers beyond the normal failure `detail`. Tests
+override the root with `AGFORGE_PROBLEMS_DIR`.
 
-The interpreter has two backends, selected by `AGFORGE_INTERPRET_BACKEND`
-(process env or `.local/.env`, default `claude`):
+### Agent backends
 
-- `claude`: one `claude -p` shot, model pinned `claude-sonnet-5`. The
-  binary is resolved via `AGFORGE_CLAUDE_CMD` (process env or
-  `.local/.env`) when it is not on PATH. ~$0.07/request.
-- `ollama`: one `/api/generate` call (`format: json`, temperature 0)
-  against an ollama server. `AGFORGE_OLLAMA_URL` and
-  `AGFORGE_OLLAMA_MODEL` are required (process env or `.local/.env`);
-  endpoints are configuration, never committed. Zero marginal cost; needs
-  a tool-grade instruct model (see the agentify/ex1 report in pj-agdev).
+Selected by `AGFORGE_AGENT_BACKEND` (process env or `.local/.env`,
+default `ollama`):
 
-The backend and per-job cost/duration are logged per job.
+- `ollama` (default): opencode headless (`opencode run`) over a local
+  ollama model — deliberately a weaker agent, so charter wording gaps
+  surface as observable behavior instead of being papered over. Binary
+  and model are configuration: `AGFORGE_OPENCODE_CMD`,
+  `AGFORGE_OPENCODE_MODEL` (e.g. `ollama/<model>`); the committed
+  `opencode.json` holds the deny-by-default bash allowlist. Zero
+  marginal cost.
+- `claude`: scoped `claude -p` (model pinned `claude-sonnet-5`, explicit
+  `--allowedTools`), the comparison/escalation backend,
+  ~$0.1–0.5/request. Binary via `AGFORGE_CLAUDE_CMD` when not on PATH.
+  When the ollama agent fails where claude succeeds, record the
+  divergence — that contrast is a finding, not a defect to hide.
+
+The backend and per-job cost/duration/turns are logged per job, plus the
+agent's final output (the observable behavior this episode collects).
 
 ## Tests
 
@@ -154,11 +152,12 @@ The backend and per-job cost/duration are logged per job.
 uv run pytest -q          # no live services needed
 ```
 
-`tests/` fakes the LLM (`AGFORGE_INTERPRET_CMD`) and generate.sh
-(`AGFORGE_GENERATE_CMD`) behind their real subprocess contracts to cover
-the interpreter and the whole pipeline, including retry/resize/refusal
-paths. Live smoke (real SwarmUI + MinIO) stays manual: POST a desire with
-an explicit size, measure the downloaded artifact.
+`tests/` covers the deterministic shell only: charter composition,
+lenient outcome parsing, budget/timeout handling, and the HTTP contract,
+through the `AGFORGE_AGENT_CMD` stub (`tests/fake_agent.py`). Agent
+behavior itself is not unit-tested — it is observed live and recorded in
+episode reports. Live smoke (real SwarmUI + MinIO) stays manual: POST a
+desire with an explicit size, measure the downloaded artifact.
 
 ## Generation parameters
 
@@ -209,10 +208,10 @@ SwarmUI's current server defaults apply):
 Service-only, optional:
 
 ```sh
-AGFORGE_INTERPRET_BACKEND= # interpreter backend: claude (default) or ollama
+AGFORGE_AGENT_BACKEND=     # agent backend: ollama (default) or claude
+AGFORGE_OPENCODE_CMD=      # path to the opencode binary when not on PATH (ollama backend)
+AGFORGE_OPENCODE_MODEL=    # opencode model ref, e.g. ollama/<model> (ollama backend)
 AGFORGE_CLAUDE_CMD=        # path to the claude binary when not on PATH (claude backend)
-AGFORGE_OLLAMA_URL=        # ollama base URL (required for the ollama backend)
-AGFORGE_OLLAMA_MODEL=      # ollama model name (required for the ollama backend)
 ```
 
 Actual values for this environment are in git-ignored `.local/.env` and
