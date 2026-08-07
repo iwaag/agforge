@@ -35,10 +35,10 @@ presigned GET URL.
 
 ## Request service
 
-An intent-level HTTP API over the pipeline: callers send a desire (prompt
-text) and poll for result artifacts. Callers know nothing about models,
-sizes, or SwarmUI — everything generation-specific is resolved here
-(`params/defaults.toml` / `.local/.env`).
+A **fully prompt-only** HTTP API over the pipeline: callers send a desire
+(prompt text) and poll for result artifacts. Callers know nothing about
+models, sizes, or SwarmUI — an internal agent reads the desire and
+assembles the concrete generation parameters itself.
 
 ```sh
 service/serve.sh          # listens on :8092 (override: AGFORGE_SERVICE_PORT)
@@ -56,12 +56,58 @@ GET  /healthz           -> { "ok": true }
 ```
 
 `kind` lets agforge later return music/video without breaking callers.
-Each request runs `scripts/generate.sh "<desire>"` in a worker thread and
-takes the final stdout line as the presigned URL; a nonzero exit maps to
-`status: "failed"` with the stderr tail in `detail` (no retries). Jobs are
-held **in memory only and vanish on service restart** — pollers of a
-restarted service get 404 and should just re-request. Generation takes tens
-of seconds; poll every few seconds.
+Jobs are held **in memory only and vanish on service restart** — pollers of
+a restarted service get 404 and should just re-request. Generation takes
+tens of seconds; poll every few seconds.
+
+### The agent path (how a desire becomes an image)
+
+Each request runs a bounded pipeline in a worker thread (whole job budget
+900 s; see `devdocs/episodes/agforge/agentify/` in pj-agdev):
+
+1. **Interpret** (`service/interpret.py`, one `claude -p` one-shot, model
+   pinned `claude-sonnet-5`): extracts the creative prompt and any
+   quantitative requirements (width/height) out of the desire text, or
+   refuses desires agforge cannot honor (wrong medium, absurd dimensions).
+   Sizes stated in the desire now *control* generation instead of being
+   passed to the diffusion model as prose. Null size → config defaults
+   (`params/defaults.toml` / `.local/.env`) apply, their intended role.
+2. **Validate** (code): bounds 64–2048, rounding to the nearest multiple
+   of 64 (SD-family requirement); rounding is recorded.
+3. **Generate** (code): `scripts/generate.sh --width/--height` — the
+   unchanged, verified low-level tool, still available directly for
+   humans/scripts.
+4. **Verify** (code, no LLM): the actual pixels of the generated file are
+   checked against the desire's numbers. Mismatch → one retry; a
+   persistent mismatch with the right shape (rounding-induced,
+   single-dimension, or aspect within 2 %) gets a deterministic resize to
+   the exact requested size and a fresh presigned URL; otherwise the job
+   fails honestly.
+
+Failure `detail` prefixes let callers tell classes apart textually:
+
+- `refused: ...` — agforge cannot honor the desire (says why).
+- `unsatisfied: ...` — generation could not be made to match the desire.
+- `interpreter error: ...` — the LLM one-shot itself failed.
+- anything else — pipeline/infra error (SwarmUI, S3, ...).
+
+Subjective quality is deliberately not judged here — callers (the coming
+director) own taste; this agent only makes quantitative intent real. The
+interpreter's `claude` binary is resolved via `AGFORGE_CLAUDE_CMD`
+(process env or `.local/.env`) when it is not on PATH; interpreter cost
+(`total_cost_usd`, ~$0.07/request) is logged per job.
+
+## Tests
+
+```sh
+uv run pytest -q          # no live services needed
+```
+
+`tests/` fakes the LLM (`AGFORGE_INTERPRET_CMD`) and generate.sh
+(`AGFORGE_GENERATE_CMD`) behind their real subprocess contracts to cover
+the interpreter and the whole pipeline, including retry/resize/refusal
+paths. Live smoke (real SwarmUI + MinIO) stays manual: POST a desire with
+an explicit size, measure the downloaded artifact.
 
 ## Generation parameters
 
@@ -108,6 +154,12 @@ Optional (see `params/defaults.toml` for sample values, otherwise
 SwarmUI's current server defaults apply):
 `AGFORGE_SWARMUI_WIDTH`, `AGFORGE_SWARMUI_HEIGHT`, `AGFORGE_SWARMUI_STEPS`,
 `AGFORGE_SWARMUI_CFGSCALE`, `AGFORGE_SWARMUI_SEED`.
+
+Service-only, optional:
+
+```sh
+AGFORGE_CLAUDE_CMD=        # path to the claude binary when not on PATH (interpreter one-shot)
+```
 
 Actual values for this environment are in git-ignored `.local/.env` and
 `.local/devenv.md` (endpoints, chosen model, quirks).
