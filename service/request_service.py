@@ -68,7 +68,8 @@ def run_job(request_id: str, desire: str) -> None:
     log(
         f"job {request_id}: agent backend={meta.get('backend')} "
         f"cost_usd={meta.get('total_cost_usd')} "
-        f"duration_ms={meta.get('duration_ms')} num_turns={meta.get('num_turns')}"
+        f"duration_ms={meta.get('duration_ms')} num_turns={meta.get('num_turns')} "
+        f"transcript={meta.get('transcript')} url_check={meta.get('url_check')}"
     )
     # The transcript is the observable agent behavior this episode collects;
     # keep it in the service log for later reading.

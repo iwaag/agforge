@@ -150,8 +150,15 @@ default `ollama`):
   When the ollama agent fails where claude succeeds, record the
   divergence — that contrast is a finding, not a defect to hide.
 
-The backend and per-job cost/duration/turns are logged per job, plus the
-agent's final output (the observable behavior this episode collects).
+Observability (since agentify ex3): the ollama backend runs
+`opencode run --format json`, and the raw event stream (tool calls
+included) is saved per job to `.local/out/<request_id>.agent.jsonl`
+(override dir: `AGFORGE_TRANSCRIPTS_DIR`) — even when the run times out
+or exits nonzero. The runner extracts the agent's words from the `text`
+events leniently (plain text passes through, so the claude backend and
+the test stub keep working). Infra-failure details keep the harness
+stderr tail. Each job logs backend, duration, cost, turns, transcript
+path, and the URL-check result, plus the agent's final output.
 
 ## Tests
 

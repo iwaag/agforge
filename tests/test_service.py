@@ -28,6 +28,7 @@ FAKE_AGENT = f"{sys.executable} {TESTS_DIR / 'fake_agent.py'}"
 def agent(monkeypatch, tmp_path):
     monkeypatch.setenv("AGFORGE_AGENT_CMD", FAKE_AGENT)
     monkeypatch.setenv("AGFORGE_PROBLEMS_DIR", str(tmp_path / "problems"))
+    monkeypatch.setenv("AGFORGE_TRANSCRIPTS_DIR", str(tmp_path / "transcripts"))
     # URL verification is exercised separately (its own test section below);
     # everywhere else the fake agent's example URLs must not hit the network.
     monkeypatch.setattr(
@@ -46,6 +47,12 @@ def agent(monkeypatch, tmp_path):
 
         def sleep(self, seconds: float) -> None:
             monkeypatch.setenv("FAKE_AGENT_SLEEP", str(seconds))
+
+        def stderr(self, text: str) -> None:
+            monkeypatch.setenv("FAKE_AGENT_STDERR", text)
+
+        def transcript(self, request_id: str) -> Path:
+            return tmp_path / "transcripts" / f"{request_id}.agent.jsonl"
 
         def capture_charter(self) -> Path:
             path = tmp_path / "charter.md"
@@ -128,6 +135,55 @@ def test_non_http_url_candidate_is_not_a_result(agent):
     assert "without a RESULT marker" in job["detail"]
 
 
+# --- opencode event-stream extraction (ex3) ---------------------------------
+
+def test_event_stream_yields_text_and_stats():
+    raw = "\n".join([
+        '{"type":"step_start","part":{}}',
+        '{"type":"text","part":{"text":"Generating now."}}',
+        '{"type":"tool","part":{"tool":"bash"}}',
+        '{"type":"step_finish","part":{"cost":0.01}}',
+        '{"type":"text","part":{"text":"RESULT_URL: http://x.example/a.png"}}',
+        '{"type":"step_finish","part":{"cost":0.02}}',
+    ])
+    text, stats = agent_run.extract_event_text(raw)
+    assert text == "Generating now.\nRESULT_URL: http://x.example/a.png"
+    assert stats == {"num_turns": 2, "total_cost_usd": 0.03}
+
+
+def test_plain_text_passes_through_unchanged():
+    raw = "just prose\nRESULT_FAILED: nope"
+    text, stats = agent_run.extract_event_text(raw)
+    assert text == raw
+    assert stats == {}
+
+
+def test_event_stream_outcome_parses_end_to_end(agent):
+    agent.output('{"type":"text","part":{"text":"RESULT_URL: http://x.example/a.png"}}')
+    job, meta = agent_run.run_request("d")
+    assert job["status"] == "done"
+    assert meta["num_turns"] == 0
+
+
+# --- transcript capture (ex3) -----------------------------------------------
+
+def test_transcript_written_and_pointed_at(agent):
+    agent.output("RESULT_URL: http://x.example/a.png")
+    job, meta = agent_run.run_request("d", request_id="feed0000feed0000")
+    transcript = agent.transcript("feed0000feed0000")
+    assert meta["transcript"] == str(transcript)
+    assert "RESULT_URL" in transcript.read_text()
+
+
+def test_transcript_survives_infra_failure(agent):
+    agent.output("half an answer before dying")
+    agent.exit_code(3)
+    job, meta = agent_run.run_request("d", request_id="dead0000dead0000")
+    assert job["status"] == "failed"
+    assert meta["transcript"] == str(agent.transcript("dead0000dead0000"))
+    assert "half an answer" in agent.transcript("dead0000dead0000").read_text()
+
+
 # --- infra failures and budget --------------------------------------------
 
 def test_agent_nonzero_exit_is_an_infra_failure(agent):
@@ -136,6 +192,24 @@ def test_agent_nonzero_exit_is_an_infra_failure(agent):
     job, _ = agent_run.run_request("d")
     assert job["status"] == "failed"
     assert "agent exited 3" in job["detail"]
+
+
+def test_nonzero_exit_keeps_stderr_tail(agent):
+    agent.exit_code(1)
+    agent.stderr("ollama: connection refused")
+    job, _ = agent_run.run_request("d")
+    assert job["status"] == "failed"
+    assert "agent exited 1" in job["detail"]
+    assert "stderr tail: ollama: connection refused" in job["detail"]
+
+
+def test_empty_output_keeps_stderr_tail(agent):
+    agent.output("")
+    agent.stderr("panic: something harness-side")
+    job, _ = agent_run.run_request("d")
+    assert job["status"] == "failed"
+    assert "agent produced no output" in job["detail"]
+    assert "stderr tail: panic: something harness-side" in job["detail"]
 
 
 def test_budget_timeout_fails_loudly(agent):

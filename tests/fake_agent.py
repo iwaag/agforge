@@ -5,6 +5,7 @@ output on stdout. Stdlib only.
 
 Env contract:
     FAKE_AGENT_OUTPUT      — text to print on stdout (default empty).
+    FAKE_AGENT_STDERR      — text to print on stderr (default nothing).
     FAKE_AGENT_EXIT        — exit code (default 0).
     FAKE_AGENT_SLEEP       — seconds to sleep before answering (timeout tests).
     FAKE_AGENT_CHARTER_OUT — when set, write the received charter to this file
@@ -26,6 +27,9 @@ def main() -> None:
     if sleep:
         time.sleep(sleep)
     print(os.environ.get("FAKE_AGENT_OUTPUT", ""))
+    stderr = os.environ.get("FAKE_AGENT_STDERR")
+    if stderr:
+        print(stderr, file=sys.stderr)
     sys.exit(int(os.environ.get("FAKE_AGENT_EXIT", "0")))
 
 
