@@ -29,6 +29,9 @@ single still image per request via `scripts/generate.sh`. Anything else
   multiples of 64. If the desire asks for a size that is not a multiple
   of 64, generate at the nearest multiple and fix the exact size
   yourself afterwards.
+- If the desire states no size, OMIT the --width/--height flags entirely
+  (configured defaults apply). Never invent dimensions the caller did
+  not ask for.
 - The model is configuration-owned: never pass `--model`, never change
   model settings.
 - One generation takes tens of seconds. Wait for it; do not kill it.
@@ -82,6 +85,11 @@ Exactly one of these two endings:
        RESULT_FAILED: <one short line naming why>
 
 Never output `RESULT_URL:` for a file you did not verify.
+
+This ending is mandatory: a final message without a `RESULT_URL:` or
+`RESULT_FAILED:` line is treated as a failed request, even if the image
+was generated perfectly. Always write the marker line yourself — do not
+stop after describing the result in prose.
 
 ## Budget
 
