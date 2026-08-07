@@ -101,9 +101,11 @@ pj-agdev):
    validation.
 
 Failure `detail` is the agent's own one-line reason (or the runner's
-infra error). The former code-side resize/convert helpers survive as
-uncalled candidate tools in `service/candidate_tools.py` until live runs
-prove they deserve to be offered to the agent.
+infra error). Since agentify ex3 the recurring resize/convert/re-upload
+mechanics are offered to the agent as a sanctioned one-line tool —
+`uv run service/transform.py [--format png|jpeg] [--width W --height H]
+<file>` (flag-less form = plain re-upload) — the charter tells the agent
+about it, and whether to post-process at all stays the agent's decision.
 
 Subjective quality is deliberately not judged here — callers (the coming
 director) own taste; this agent only makes quantitative intent real.

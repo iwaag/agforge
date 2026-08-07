@@ -54,7 +54,9 @@ def test_charter_contains_the_need_to_know(agent):
     charter = agent_run.compose_charter("a red dragon, 512x512", "abcdef0123456789")
     assert "a red dragon, 512x512" in charter          # desire, verbatim
     assert "abcdef0123456789" in charter               # request id
-    assert "scripts/generate.sh" in charter            # the tool
+    assert "scripts/generate.sh" in charter            # the generation tool
+    assert "service/transform.py" in charter           # the post-processing tool
+    assert "python -c" not in charter                  # fragile snippet retired (ex3)
     assert "RESULT_URL:" in charter and "RESULT_FAILED:" in charter
     assert "nctl-outbox" in charter                    # bucket rule
     assert str(agent_run.DEFAULT_BUDGET_SECONDS) in charter

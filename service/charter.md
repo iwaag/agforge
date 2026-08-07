@@ -37,9 +37,21 @@ single still image per request via `scripts/generate.sh`. Anything else
 - One generation takes tens of seconds. Wait for it; do not kill it.
 - The generator currently tends to emit JPEG regardless of what was
   asked. Checking the delivered file format — and converting it when the
-  desire asks for something else — is YOUR job. `sips` (macOS) and
-  Python Pillow (via `uv run python`) are available for inspecting,
-  resizing, and converting the local file.
+  desire asks for something else — is YOUR job.
+
+## The post-processing tool
+
+    uv run service/transform.py [--format png|jpeg] [--width W --height H] <local file>
+
+- Resizes and/or converts the local file, re-uploads the result, and
+  prints the fresh presigned URL as the LAST line of stdout (the
+  produced local file path goes to stderr as `local: <path>`).
+- Whether post-processing is needed at all is YOUR judgment — this tool
+  only does the mechanics once you decide.
+- With no flags it uploads the file as-is. If you post-process a file
+  some other way (`sips`, Pillow via `uv run python`, … are available),
+  use that flag-less form to upload it — never hand-roll S3 calls, and
+  never touch the `nctl-outbox` bucket.
 
 ## Data shaping rules
 
@@ -47,17 +59,8 @@ single still image per request via `scripts/generate.sh`. Anything else
   or words like "PNG" belong in the flags / your post-processing, never
   in the prompt text.
 - If you post-process the local file, the delivered URL must point at
-  the processed file. Re-upload it with the existing helper — never
-  hand-roll S3 calls, and never touch the `nctl-outbox` bucket:
-
-      uv run python -c "
-      import pathlib, sys
-      sys.path.insert(0, 'scripts')
-      import generate
-      print(generate.upload_and_presign(generate.load_env(), pathlib.Path('YOUR_FILE'), generate.DEFAULT_TTL_MINUTES))
-      "
-
-  The printed URL is the delivered URL.
+  the processed file (a fresh upload — the URL printed by
+  `service/transform.py`), never the original generation's URL.
 
 ## How to finish (contract)
 
