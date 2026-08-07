@@ -5,6 +5,24 @@ generating images (and later music/video) that accumulates know-how, config,
 docs, and scripts under the "Easier Next Time" policy. Whatever was painful
 this time should be one command next time.
 
+## Development policy: trust the agent first
+
+- Start by trusting the agent: let it fulfill a caller's desire
+  non-deterministically, with its own judgment. When it fails or cannot
+  comply, have it leave a report **in its own words** (see Problem reports
+  below) — those reports are valuable assets for improvement, not noise.
+  A failure that produced an honest report is a successful experiment.
+- Improve the process gradually. Move a step to deterministic
+  script/code only after it has proven to be a recurring, mechanical part
+  of the agent's behavior, and without sacrificing overall flexibility.
+  Preemptively locking the agent into rigid extraction/validation
+  pipelines to eliminate the possibility of failure is NOT recommended —
+  it wastes the agent's capability and kills the learning loop.
+
+(The current strict interpret→validate→convert pipeline predates this
+policy; it is being reverted toward an agentic run in
+`devdocs/episodes/agforge/agentify/ex2/` in pj-agdev.)
+
 ## What lives where
 
 - `scripts/` — pipeline scripts. The main deliverable is a one-command
@@ -67,8 +85,10 @@ Each request runs a bounded pipeline in a worker thread (whole job budget
 
 1. **Interpret** (`service/interpret.py`, one LLM one-shot): extracts the
    creative prompt and any
-   quantitative requirements (width/height) out of the desire text, or
-   refuses desires agforge cannot honor (wrong medium, absurd dimensions).
+   quantitative requirements (width/height, file format png/jpeg) out of
+   the desire text, or
+   refuses desires agforge cannot honor (wrong medium, absurd dimensions,
+   unsupported file formats).
    Sizes stated in the desire now *control* generation instead of being
    passed to the diffusion model as prose. Null size → config defaults
    (`params/defaults.toml` / `.local/.env`) apply, their intended role.
@@ -77,12 +97,13 @@ Each request runs a bounded pipeline in a worker thread (whole job budget
 3. **Generate** (code): `scripts/generate.sh --width/--height` — the
    unchanged, verified low-level tool, still available directly for
    humans/scripts.
-4. **Verify** (code, no LLM): the actual pixels of the generated file are
-   checked against the desire's numbers. Mismatch → one retry; a
-   persistent mismatch with the right shape (rounding-induced,
-   single-dimension, or aspect within 2 %) gets a deterministic resize to
-   the exact requested size and a fresh presigned URL; otherwise the job
-   fails honestly.
+4. **Verify** (code, no LLM): the actual pixels and file format of the
+   generated file are checked against the desire. Size mismatch → one
+   retry; a persistent mismatch with the right shape (rounding-induced,
+   single-dimension, or aspect within 2 %) gets a deterministic resize; a
+   format mismatch gets a deterministic conversion (png↔jpeg, alpha
+   flattened for JPEG). Either produces a fresh presigned URL; otherwise
+   the job fails honestly.
 
 Failure `detail` prefixes let callers tell classes apart textually:
 
@@ -93,6 +114,25 @@ Failure `detail` prefixes let callers tell classes apart textually:
 
 Subjective quality is deliberately not judged here — callers (the coming
 director) own taste; this agent only makes quantitative intent real.
+
+### Problem reports (Easier Next Time)
+
+Every `refused`/`unsatisfied` failure — a request agforge could not
+fulfill, as opposed to an infrastructure error — is also recorded as
+
+```text
+.local/problems/<UTC stamp>-<request_id[:8]>/problem.md
+```
+
+This is the raw inbox of the Easier Next Time loop: a human and an agent
+review these reports together, decide a fix or a capability change, then
+delete or archive the folder. Only the path rule is fixed — the content
+should ideally be the agent explaining in its own words what was asked and
+why it could not comply (today's implementation still writes a fixed
+template with the verbatim desire and failure detail; ex2 hands authorship
+to the agent). Reports are local-only (git-ignored) and never surfaced to callers
+beyond the normal failure `detail`. Tests override the root with
+`AGFORGE_PROBLEMS_DIR`.
 
 The interpreter has two backends, selected by `AGFORGE_INTERPRET_BACKEND`
 (process env or `.local/.env`, default `claude`):

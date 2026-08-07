@@ -8,11 +8,12 @@ One LLM one-shot turns free desire text into strict JSON the pipeline can
 act on:
 
     {"prompt": "<cleaned creative prompt>", "width": int|null,
-     "height": int|null, "refuse": false}
+     "height": int|null, "format": "png"|"jpeg"|null, "refuse": false}
 or  {"refuse": true, "reason": "<one sentence>"}
 
 null width/height means the desire stated no size, so config defaults apply
-downstream. Malformed LLM output is retried once, then InterpretError is
+downstream. null format means the desire stated no file format, so whatever
+the generator produces is delivered as-is. Malformed LLM output is retried once, then InterpretError is
 raised (the service maps it to a failed job).
 
 CLI (for manual checks): uv run service/interpret.py "<desire>"
@@ -61,11 +62,13 @@ DIM_MULTIPLE = 64
 # artifacts[].kind.
 CAPABILITIES = f"""\
 agforge can currently:
-- generate exactly ONE still image per request (PNG or JPEG output)
+- generate exactly ONE still image per request
 - honor requested width/height between {MIN_DIM} and {MAX_DIM} pixels
+- deliver the image as PNG or JPEG when the desire asks for one of those
 agforge can NOT currently:
 - generate video, animation, music, audio, or 3D assets
 - generate multiple images in one request
+- deliver file formats other than PNG or JPEG (no webp, gif, svg, ...)
 - choose or switch the underlying model (model choice is configuration)"""
 
 PROMPT_TEMPLATE = f"""\
@@ -78,16 +81,19 @@ Read the desire below and answer with RAW JSON only (no markdown fences, no
 commentary), in exactly one of these two shapes:
 
 1. If agforge can honor the desire:
-{{"prompt": "<creative prompt>", "width": <int or null>, "height": <int or null>, "refuse": false}}
+{{"prompt": "<creative prompt>", "width": <int or null>, "height": <int or null>, "format": <"png" or "jpeg" or null>, "refuse": false}}
    - "prompt": the desire rewritten as a clean creative prompt for a
      diffusion model. Remove quantitative requirements (sizes, pixel counts,
-     aspect-ratio numbers) from the text — they belong in the fields, and
-     keep the prompt in the desire's own language otherwise.
+     aspect-ratio numbers, file formats) from the text — they belong in the
+     fields, and keep the prompt in the desire's own language otherwise.
    - "width"/"height": the pixel dimensions the desire asks for, as
      integers. Interpret approximate or unusual phrasings into concrete
      integers. If the desire states no size at all, use null for both.
      If it implies only an aspect ratio, pick concrete dimensions within
      bounds matching that ratio.
+   - "format": the delivered file format the desire explicitly asks for,
+     normalized to "png" or "jpeg" (jpg means jpeg). If the desire states
+     no file format, use null.
 2. If agforge can NOT honor the desire (wrong medium, impossible or
    out-of-bounds requirements):
 {{"refuse": true, "reason": "<one short sentence naming what agforge cannot do>"}}
@@ -245,7 +251,22 @@ def parse_interpretation(text: str) -> dict:
         if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
             raise InterpretError(f"{key} must be an integer or null, got {value!r}")
         dims[key] = value
-    return {"prompt": prompt.strip(), "width": dims["width"], "height": dims["height"], "refuse": False}
+    fmt = data.get("format")
+    if isinstance(fmt, str):
+        fmt = fmt.strip().lower().lstrip(".")
+        if fmt == "jpg":
+            fmt = "jpeg"
+        if fmt not in ("png", "jpeg"):
+            raise InterpretError(f"format must be png, jpeg, or null, got {data.get('format')!r}")
+    elif fmt is not None:
+        raise InterpretError(f"format must be a string or null, got {fmt!r}")
+    return {
+        "prompt": prompt.strip(),
+        "width": dims["width"],
+        "height": dims["height"],
+        "format": fmt,
+        "refuse": False,
+    }
 
 
 def interpret(desire: str) -> tuple[dict, dict]:

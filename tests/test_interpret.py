@@ -28,10 +28,30 @@ def test_field_extraction(fake_llm):
         "prompt": "a red dragon",
         "width": 512,
         "height": 512,
+        "format": None,
         "refuse": False,
     }
     assert meta["attempts"] == 1
     assert meta["total_cost_usd"] == 0.01
+
+
+@pytest.mark.parametrize(
+    ("stated", "expected"),
+    [('"png"', "png"), ('"jpeg"', "jpeg"), ('"jpg"', "jpeg"), ('"PNG"', "png"), ("null", None)],
+)
+def test_format_extraction(fake_llm, stated, expected):
+    fake_llm(f'{{"prompt": "x", "width": null, "height": null, "format": {stated}, "refuse": false}}')
+    interpretation, _ = interpret.interpret("anything")
+    assert interpretation["format"] == expected
+
+
+def test_unsupported_format_is_malformed(fake_llm):
+    fake_llm(
+        '{"prompt": "x", "width": null, "height": null, "format": "webp", "refuse": false}',
+        '{"prompt": "x", "width": null, "height": null, "format": "webp", "refuse": false}',
+    )
+    with pytest.raises(interpret.InterpretError):
+        interpret.interpret("anything")
 
 
 def test_null_passthrough(fake_llm):
