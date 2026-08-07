@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -28,6 +28,13 @@ FAKE_AGENT = f"{sys.executable} {TESTS_DIR / 'fake_agent.py'}"
 def agent(monkeypatch, tmp_path):
     monkeypatch.setenv("AGFORGE_AGENT_CMD", FAKE_AGENT)
     monkeypatch.setenv("AGFORGE_PROBLEMS_DIR", str(tmp_path / "problems"))
+    # URL verification is exercised separately (its own test section below);
+    # everywhere else the fake agent's example URLs must not hit the network.
+    monkeypatch.setattr(
+        agent_run,
+        "verify_result_url",
+        lambda url: {"ok": True, "status": 200, "content_type": "image/png", "size_bytes": 1},
+    )
     request_service.jobs.clear()
 
     class Agent:
@@ -139,6 +146,74 @@ def test_budget_timeout_fails_loudly(agent):
     assert time.monotonic() - started < 4
     assert job["status"] == "failed"
     assert "timed out" in job["detail"]
+
+
+# --- runner-side URL verification (ex3) ------------------------------------
+
+@pytest.fixture
+def artifact_server(agent, monkeypatch):
+    """Real HTTP server + real verify_result_url (fixture stub removed)."""
+    monkeypatch.setattr(agent_run, "verify_result_url", REAL_VERIFY)
+
+    class ArtifactHandler(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/good.png":
+                body = b"\x89PNG fake bytes"
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_error(403)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), ArtifactHandler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+
+
+REAL_VERIFY = agent_run.verify_result_url
+
+
+def test_verified_url_is_delivered_done_with_evidence(agent, artifact_server):
+    agent.output(f"RESULT_URL: {artifact_server}/good.png")
+    job, meta = agent_run.run_request("d")
+    assert job["status"] == "done"
+    assert meta["url_check"] == {
+        "ok": True,
+        "status": 200,
+        "content_type": "image/png",
+        "size_bytes": 15,
+    }
+
+
+def test_corrupted_url_fails_as_transcription_problem(agent, artifact_server):
+    agent.output(f"RESULT_URL: {artifact_server}/corrupted-signature.png")
+    job, meta = agent_run.run_request("d")
+    assert job["status"] == "failed"
+    assert "HTTP 403" in job["detail"]
+    assert "mistranscribed" in job["detail"]
+    assert meta["url_check"] == {"ok": False, "reason": "HTTP 403"}
+
+
+def test_unreachable_url_fails_verification(agent, monkeypatch):
+    monkeypatch.setattr(agent_run, "verify_result_url", REAL_VERIFY)
+    agent.output("RESULT_URL: http://127.0.0.1:1/nope.png")
+    job, _ = agent_run.run_request("d")
+    assert job["status"] == "failed"
+    assert "RESULT_URL failed verification" in job["detail"]
+
+
+def test_failed_outcome_skips_verification(agent, monkeypatch):
+    monkeypatch.setattr(agent_run, "verify_result_url", REAL_VERIFY)
+    agent.output("RESULT_FAILED: cannot generate music")
+    job, meta = agent_run.run_request("d")
+    assert job == {"status": "failed", "detail": "cannot generate music"}
+    assert "url_check" not in meta
 
 
 # --- run_job mapping -------------------------------------------------------

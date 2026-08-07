@@ -99,6 +99,11 @@ pj-agdev):
    line>`, tolerating surrounding prose. Neither marker → the job fails
    with the output tail as `detail`. No retry machinery, no strict-JSON
    validation.
+4. **Runner-side URL verification** (since agentify ex3): before a
+   `done` is delivered, the runner GETs the `RESULT_URL` once (GET, not
+   HEAD — MinIO presigned GETs may 403 on HEAD). Non-200 or unreachable
+   fails the job with a detail naming it as a likely URL transcription
+   problem; on success the content-type/size are logged as evidence.
 
 Failure `detail` is the agent's own one-line reason (or the runner's
 infra error). Since agentify ex3 the recurring resize/convert/re-upload

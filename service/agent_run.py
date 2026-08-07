@@ -13,7 +13,9 @@ outcome markers from the agent's output:
                                        by the agent, in its own words)
 
 Neither marker present -> the job fails with the tail of the agent
-output as detail. No retry machinery, no strict-JSON validation — the
+output as detail. A `done` outcome is delivered only after the runner
+GETs the URL once (ex3 hardening): non-200 or unreachable fails the job
+with a detail naming it as a likely transcription problem. No retry machinery, no strict-JSON validation — the
 agent is trusted to drive generation, self-check, and problem reporting.
 
 Backends, selected by AGFORGE_AGENT_BACKEND (process env or
@@ -42,6 +44,8 @@ import shlex
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -227,6 +231,34 @@ def parse_outcome(output: str) -> dict:
     }
 
 
+URL_CHECK_TIMEOUT_SECONDS = 30
+
+
+def verify_result_url(url: str) -> dict:
+    """GET the delivered RESULT_URL once — cheap, deterministic, no judgment.
+
+    Ex2 saw the agent retype presigned URLs lossily; a corrupted URL was
+    still delivered as `done`. One GET catches that transcription class
+    without taking anything away from the agent. MinIO presigned GETs
+    answer plain GET (HEAD may 403 — never use HEAD here). Returns
+    {"ok": True, "status", "content_type", "size_bytes"} or
+    {"ok": False, "reason"}.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=URL_CHECK_TIMEOUT_SECONDS) as resp:
+            body = resp.read()
+            return {
+                "ok": True,
+                "status": resp.status,
+                "content_type": resp.headers.get("Content-Type", ""),
+                "size_bytes": len(body),
+            }
+    except urllib.error.HTTPError as error:
+        return {"ok": False, "reason": f"HTTP {error.code}"}
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as error:
+        return {"ok": False, "reason": str(error) or type(error).__name__}
+
+
 def run_request(
     desire: str,
     request_id: str | None = None,
@@ -244,7 +276,19 @@ def run_request(
     except AgentRunError as error:
         return {"status": "failed", "detail": str(error)}, {"backend": "error"}
     meta["output"] = output
-    return parse_outcome(output), meta
+    job = parse_outcome(output)
+    if job["status"] == "done":
+        check = verify_result_url(job["artifacts"][0]["url"])
+        meta["url_check"] = check
+        if not check["ok"]:
+            job = {
+                "status": "failed",
+                "detail": (
+                    f"RESULT_URL failed verification ({check['reason']}) — "
+                    "the agent likely mistranscribed the presigned URL"
+                ),
+            }
+    return job, meta
 
 
 def main() -> None:
