@@ -2,32 +2,34 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""One trusted agentic run per request (agentify ex2).
+"""One trusted agentic run per request.
 
 Composes a charter prompt from `service/charter.md`, runs one headless
-agent over it with a scoped tool allowlist, and leniently reads the
-outcome markers from the agent's output:
+agent over it, and serves whatever the agent left for the caller.
 
-    RESULT_URL: <presigned url>     -> fulfilled
-    RESULT_FAILED: <one line>       -> honest failure (problem.md written
-                                       by the agent, in its own words)
+The caller's answer is the agent's to write. It reads back, in order:
 
-Neither marker present -> the job fails with the tail of the agent
-output as detail. A `done` outcome is delivered only after the runner
-GETs the URL once (ex3 hardening): non-200 or unreachable fails the job
-with a detail naming it as a likely transcription problem. No retry machinery, no strict-JSON validation — the
-agent is trusted to drive generation, self-check, and problem reporting.
+1. `.local/jobs/<request_id>/result.json` — served **unvalidated**. The
+   agent decides what `status` means, what goes in `artifacts`, whether
+   to add a `reply`. No schema, no key whitelist, no coercion.
+2. `RESULT_URL:` / `RESULT_FAILED:` anywhere in the agent's words — a
+   lenient alternative, not a mandated path.
+3. Neither — the runner states the fact that the run ended with nothing
+   for the caller, and carries the agent's own final words along.
+
+Nothing here judges whether the agent did well. A `status` this module
+fills in describes what reached the caller; the caller's own
+requirements are the caller's to enforce (unshackle_agent turn1).
 
 Backends, selected by AGFORGE_AGENT_BACKEND (process env or
 `.local/.env`, default `ollama`):
 
 - `ollama`: opencode headless (`opencode run`) against the local ollama
-  model. Tool permissions come from the committed `opencode.json`
-  allowlist in the agforge root (deny by default). Binary and model are
-  configuration: AGFORGE_OPENCODE_CMD, AGFORGE_OPENCODE_MODEL.
-- `claude`: scoped `claude -p` (model pinned below) with an explicit
-  --allowedTools list. NEVER --dangerously-skip-permissions — this runs
-  natively on the agstudio Mac and local policy forbids it here.
+  model. Tool grants come from `opencode.json` in the agforge root.
+  Binary and model: AGFORGE_OPENCODE_CMD, AGFORGE_OPENCODE_MODEL.
+- `claude`: scoped `claude -p` (model pinned below). NEVER
+  `--dangerously-skip-permissions` — this runs natively on the agstudio
+  Mac and local policy forbids it here.
 
 Test hook: AGFORGE_AGENT_CMD replaces the whole agent invocation with a
 command that reads the charter on stdin and prints agent-style output on
@@ -44,8 +46,6 @@ import shlex
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import uuid
 from pathlib import Path
 
@@ -56,19 +56,57 @@ CLAUDE_MODEL = "claude-sonnet-5"
 DEFAULT_BUDGET_SECONDS = 900
 OUTPUT_TAIL_CHARS = 800
 
-# Scoped allowlist for the claude backend — the agent gets exactly the
-# commands the charter tells it about, nothing more.
+# Tool grant for the claude backend. Wide on purpose (Tool Giving): the
+# agent gets far more than the charter mentions, so it can reach for
+# whatever a desire actually needs. Still an allowlist, not `*` — these
+# runs are native on the developer's own Mac, where full-open would have
+# the blast radius of --dangerously-skip-permissions.
 CLAUDE_ALLOWED_TOOLS = (
     "Bash(scripts/generate.sh:*)",
     "Bash(./scripts/generate.sh:*)",
-    "Bash(uv run:*)",
+    "Bash(sh scripts/generate.sh:*)",
+    "Bash(uv:*)",
+    "Bash(python3:*)",
+    "Bash(pip:*)",
+    "Bash(curl:*)",
     "Bash(sips:*)",
+    "Bash(magick:*)",
+    "Bash(ffmpeg:*)",
+    "Bash(ffprobe:*)",
     "Bash(file:*)",
     "Bash(ls:*)",
+    "Bash(pwd:*)",
+    "Bash(cd:*)",
     "Bash(mkdir:*)",
+    "Bash(cp:*)",
+    "Bash(mv:*)",
+    "Bash(rm:*)",
     "Bash(cat:*)",
+    "Bash(head:*)",
+    "Bash(tail:*)",
+    "Bash(wc:*)",
+    "Bash(grep:*)",
+    "Bash(rg:*)",
+    "Bash(find:*)",
+    "Bash(sed:*)",
+    "Bash(awk:*)",
+    "Bash(echo:*)",
+    "Bash(printf:*)",
+    "Bash(jq:*)",
+    "Bash(date:*)",
+    "Bash(env:*)",
+    "Bash(which:*)",
+    "Bash(mc:*)",
+    "Bash(git status:*)",
+    "Bash(git log:*)",
+    "Bash(git diff:*)",
+    "Bash(git show:*)",
     "Read",
     "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "WebFetch",
 )
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
@@ -111,10 +149,14 @@ def problems_dir() -> Path:
     return Path(override) if override else AGFORGE_ROOT / ".local" / "problems"
 
 
-def problem_path(request_id: str) -> Path:
-    """The path rule (location only — content is always the agent's)."""
-    stamp = time.strftime("%Y%m%d-%H%M%SZ", time.gmtime())
-    return problems_dir() / f"{stamp}-{request_id[:8]}" / "problem.md"
+def jobs_dir() -> Path:
+    override = os.environ.get("AGFORGE_JOBS_DIR")
+    return Path(override) if override else AGFORGE_ROOT / ".local" / "jobs"
+
+
+def result_path(request_id: str) -> Path:
+    """Where the caller looks. The file's content is entirely the agent's."""
+    return jobs_dir() / request_id / "result.json"
 
 
 def compose_charter(
@@ -124,7 +166,8 @@ def compose_charter(
     return (
         template.replace("{{DESIRE}}", desire)
         .replace("{{REQUEST_ID}}", request_id)
-        .replace("{{PROBLEM_PATH}}", str(problem_path(request_id)))
+        .replace("{{RESULT_PATH}}", str(result_path(request_id)))
+        .replace("{{PROBLEMS_DIR}}", str(problems_dir()))
         .replace("{{BUDGET_SECONDS}}", str(budget_seconds))
     )
 
@@ -162,7 +205,7 @@ def extract_event_text(raw: str) -> tuple[str, dict]:
     under part.text, and step_finish events carry per-step cost. Lines
     that are not such events (plain-text output from the test stub or an
     older opencode) pass through unchanged, so this degrades to identity
-    on non-JSON output. Returns (text_for_marker_scanning, stats).
+    on non-JSON output. Returns (agent_text, stats).
     """
     texts: list[str] = []
     turns = 0
@@ -198,11 +241,9 @@ def run_agent(
     """Run one headless agent over the charter; return (output_text, meta).
 
     Raises AgentRunError on launch failure, timeout, or nonzero exit —
-    infra failures, not ENT problem reports. Whatever the agent process
-    wrote to stdout is saved raw to transcript_path (even on timeout or
-    nonzero exit), and infra-failure details keep the harness stderr
-    tail so the next empty-output flake is diagnosable (ex3, after ex2
-    had nothing to diagnose one with).
+    facts about the process, not statements about the agent's work.
+    Whatever the agent process wrote to stdout is saved raw to
+    transcript_path (even on timeout or nonzero exit).
     """
     if timeout <= 0:
         raise AgentRunError("agent run timed out (no budget left)")
@@ -273,12 +314,27 @@ def run_agent(
     return output, meta
 
 
-def parse_outcome(output: str) -> dict:
-    """Leniently read the finish contract out of the agent's output.
+def read_result(request_id: str) -> dict | None:
+    """Read `.local/jobs/<id>/result.json` — the agent's own answer.
 
-    Scans every line for the last RESULT_URL: / RESULT_FAILED: marker,
-    tolerating surrounding prose and markdown decoration. Returns the job
-    dict for the HTTP contract.
+    Served as written: no schema, no key whitelist, no value coercion.
+    Returns None when the agent left nothing (or left something that is
+    not a JSON object, which cannot be an HTTP body here).
+    """
+    path = result_path(request_id)
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def scan_markers(output: str) -> dict | None:
+    """The lenient alternative: `RESULT_URL:` / `RESULT_FAILED:` in prose.
+
+    Scans every line for the last marker, tolerating surrounding prose
+    and markdown decoration. Returns None when there is no marker — an
+    absent marker is not an outcome, so nothing is decided here.
     """
     url = failed = None
     for line in output.splitlines():
@@ -292,41 +348,43 @@ def parse_outcome(output: str) -> dict:
     if url:
         return {"status": "done", "artifacts": [{"kind": "image", "url": url}]}
     if failed is not None:
-        detail = failed or "agent reported failure without a reason"
-        return {"status": "failed", "detail": detail[-OUTPUT_TAIL_CHARS:]}
-    tail = output.strip()[-OUTPUT_TAIL_CHARS:]
-    return {
-        "status": "failed",
-        "detail": f"agent finished without a RESULT marker; output tail: {tail}",
-    }
+        return {"status": "failed", "detail": failed[-OUTPUT_TAIL_CHARS:]}
+    return None
 
 
-URL_CHECK_TIMEOUT_SECONDS = 30
+def resolve_outcome(request_id: str, output: str) -> tuple[dict, str]:
+    """What the caller receives, and where it came from.
 
-
-def verify_result_url(url: str) -> dict:
-    """GET the delivered RESULT_URL once — cheap, deterministic, no judgment.
-
-    Ex2 saw the agent retype presigned URLs lossily; a corrupted URL was
-    still delivered as `done`. One GET catches that transcription class
-    without taking anything away from the agent. MinIO presigned GETs
-    answer plain GET (HEAD may 403 — never use HEAD here). Returns
-    {"ok": True, "status", "content_type", "size_bytes"} or
-    {"ok": False, "reason"}.
+    Order: the agent's result file, then markers in its words, then the
+    plain fact that the run ended with nothing for the caller. The last
+    case is a statement about what reached the caller — never a verdict
+    on the run.
     """
-    try:
-        with urllib.request.urlopen(url, timeout=URL_CHECK_TIMEOUT_SECONDS) as resp:
-            body = resp.read()
-            return {
-                "ok": True,
-                "status": resp.status,
-                "content_type": resp.headers.get("Content-Type", ""),
-                "size_bytes": len(body),
-            }
-    except urllib.error.HTTPError as error:
-        return {"ok": False, "reason": f"HTTP {error.code}"}
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as error:
-        return {"ok": False, "reason": str(error) or type(error).__name__}
+    result = read_result(request_id)
+    if result is not None:
+        job = dict(result)
+        # Fill only what is structurally absent. `status` says the run is
+        # over (the one thing the runner knows and the agent could not);
+        # `artifacts` is an empty container, not a claim.
+        job.setdefault("status", "ended")
+        job.setdefault("artifacts", [])
+        return job, "result_file"
+    markers = scan_markers(output)
+    if markers is not None:
+        return markers, "markers"
+    tail = output.strip()[-OUTPUT_TAIL_CHARS:]
+    return (
+        {
+            "status": "ended",
+            "artifacts": [],
+            "detail": (
+                "the run ended and left nothing for the caller "
+                f"({result_path(request_id)} absent, no RESULT marker); "
+                f"the agent's last words: {tail}"
+            ),
+        },
+        "nothing",
+    )
 
 
 def run_request(
@@ -334,10 +392,12 @@ def run_request(
     request_id: str | None = None,
     budget_seconds: int = DEFAULT_BUDGET_SECONDS,
 ) -> tuple[dict, dict]:
-    """The whole ex2 shape: charter -> one agent run -> lenient outcome.
+    """charter -> one agent run -> whatever the agent left for the caller.
 
     Returns (job_dict, meta). Infra failures come back as failed jobs, not
-    exceptions — callers only need the job dict.
+    exceptions — callers only need the job dict. Even then the result file
+    is honored: an agent that answered before its process died still
+    answered.
     """
     request_id = request_id or uuid.uuid4().hex
     charter = compose_charter(desire, request_id, budget_seconds)
@@ -350,20 +410,18 @@ def run_request(
         meta = {"backend": "error"}
         if transcript_path.exists():
             meta["transcript"] = str(transcript_path)
+        result = read_result(request_id)
+        if result is not None:
+            meta["outcome_from"] = "result_file"
+            meta["infra_error"] = str(error)
+            job = dict(result)
+            job.setdefault("status", "ended")
+            job.setdefault("artifacts", [])
+            return job, meta
         return {"status": "failed", "detail": str(error)}, meta
     meta["output"] = output
-    job = parse_outcome(output)
-    if job["status"] == "done":
-        check = verify_result_url(job["artifacts"][0]["url"])
-        meta["url_check"] = check
-        if not check["ok"]:
-            job = {
-                "status": "failed",
-                "detail": (
-                    f"RESULT_URL failed verification ({check['reason']}) — "
-                    "the agent likely mistranscribed the presigned URL"
-                ),
-            }
+    job, source = resolve_outcome(request_id, output)
+    meta["outcome_from"] = source
     return job, meta
 
 

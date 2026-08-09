@@ -4,39 +4,30 @@
 # ///
 """agforge request service — intent-level HTTP API over one agentic run.
 
-Contract (see pj-agdev/devdocs/episodes/connect_world_and_forge/plan.md):
-
     POST /api/requests      { "desire": "<prompt text>" }
                             -> 202 { "request_id": "..." }
-    GET  /api/requests/{id} -> { "status": "working" | "done" | "failed"
-                                           | "answered",
-                                 "artifacts": [ { "kind": "image", "url": "..." } ],
-                                 "reply": "<present on answered>",
-                                 "detail": "<present on failed>" }
+    GET  /api/requests/{id} -> whatever the agent left for the caller,
+                               plus "status": "working" while it runs
     GET  /guide             -> service/GUIDE.md as text/plain
     GET  /healthz           -> { "ok": true }
 
-`POST /api/requests` is the single entrance, so capability and cost
+`POST /api/requests` is the single entrance: capability and cost
 questions arrive in the same `desire` field as the work
-(devpolicy/policy.md, Entrance Guide). A desire that is a question about
-what agforge can do or what it costs is answered from `service/GUIDE.md`
-immediately and finishes `answered` — no agent run, no money, no wait. The
-card is re-read from disk per request (cagent's llms.txt pattern), so
-editing it needs no restart.
+(devpolicy/policy.md, Entrance Guide). The agent answers them — it is
+told `service/GUIDE.md` exists and reads it when a desire is asking that.
+No matcher decides which desires are questions (unshackle_agent turn1
+removed the regex classifier); `GET /guide` still serves the card raw for
+deterministic reads.
 
 Jobs are held in memory only and vanish on restart. Each request runs ONE
-trusted agentic run in a worker thread (agentify ex2,
-pj-agdev/devdocs/episodes/agforge/agentify/ex2/plan.md):
+trusted agentic run in a worker thread:
 
-    compose charter (service/charter.md) -> one headless agent run with a
-    scoped tool allowlist -> leniently read RESULT_URL / RESULT_FAILED
+    compose charter (service/charter.md) -> one headless agent run ->
+    serve what the agent left at .local/jobs/<id>/result.json
 
-The agent drives generation itself via scripts/generate.sh, checks its
-own output, and — when it cannot fulfill the desire — writes
-`.local/problems/<UTC stamp>-<request_id[:8]>/problem.md` in its own
-words before failing. There is no code-side interpret/verify/resize/
-convert stage and no templated problem report anymore; failure `detail`
-is whatever the agent (or the runner, on infra errors) said.
+The polled body is the agent's own JSON, unvalidated. This service does
+not inspect it, score it, or decide whether the agent did well; a caller
+with requirements enforces its own.
 
 Run: scripts under service/ read no CLI args; port comes from
 AGFORGE_SERVICE_PORT (default 8092). Backend selection and test hook
@@ -45,7 +36,6 @@ AGFORGE_SERVICE_PORT (default 8092). Backend selection and test hook
 
 import json
 import os
-import re
 import sys
 import threading
 import uuid
@@ -62,48 +52,6 @@ import agent_run  # noqa: E402
 
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
-
-
-# --- the entrance guide ---------------------------------------------------
-#
-# Recognising a guide question is deliberately a cheap, deterministic
-# matcher rather than a model: the whole point is that asking "what does
-# this cost" must not itself cost an agent run. It is biased towards
-# missing a guide question (which then simply runs as a desire and fails
-# honestly) over stealing a real one — hence the length bound and the
-# generation-verb veto, which wins over any question phrasing.
-
-GUIDE_QUESTION = re.compile(
-    r"what (can|do) you (do|make|generate|produce)"
-    r"|what (are|is) your (capabilit|limit)"
-    r"|what (is|are) (this|you)\b"
-    r"|what (does|will) (it|this|that|a request|an image) cost"
-    r"|how much (does|do|is|would)"
-    r"|what'?s the (cost|price)"
-    r"|\b(capabilities|your price|price list|pricing)\b"
-    r"|何ができ|なにができ|できること|いくら(かかる|ですか)?|料金|費用|コスト",
-    re.IGNORECASE,
-)
-
-# A desire that asks for something to be made is work, whatever question
-# mark it carries: "can you draw me a picture of a price tag?" is a request.
-# Verbs only — the asset *nouns* stay out, because "how much does an image
-# cost" is a guide question and vetoing on the word "image" would eat it.
-GENERATION_VERB = re.compile(
-    r"\b(draw|paint|render|generate|create|design|illustrate|sketch|"
-    r"make (me|a|an|us)|produce a)\b"
-    r"|描い|書い|作って|生成して",
-    re.IGNORECASE,
-)
-
-GUIDE_QUESTION_MAX_CHARS = 200
-
-
-def is_guide_question(desire: str) -> bool:
-    text = desire.strip()
-    if len(text) > GUIDE_QUESTION_MAX_CHARS or GENERATION_VERB.search(text):
-        return False
-    return bool(GUIDE_QUESTION.search(text))
 
 
 def read_guide() -> str:
@@ -132,7 +80,7 @@ def run_job(request_id: str, desire: str) -> None:
         f"job {request_id}: agent backend={meta.get('backend')} "
         f"cost_usd={meta.get('total_cost_usd')} "
         f"duration_ms={meta.get('duration_ms')} num_turns={meta.get('num_turns')} "
-        f"transcript={meta.get('transcript')} url_check={meta.get('url_check')}"
+        f"transcript={meta.get('transcript')} outcome_from={meta.get('outcome_from')}"
     )
     # The transcript is the observable agent behavior this episode collects;
     # keep it in the service log for later reading.
@@ -186,19 +134,6 @@ class Handler(BaseHTTPRequestHandler):
                 400, {"error": "bad_request", "detail": 'body must be {"desire": "<prompt text>"}'}
             )
         request_id = uuid.uuid4().hex
-        if is_guide_question(desire):
-            # `detail` carries a readable one-liner as well, so a client that
-            # only understands working/done/failed shows something sensible
-            # instead of an empty failure.
-            with jobs_lock:
-                jobs[request_id] = {
-                    "status": "answered",
-                    "artifacts": [],
-                    "reply": read_guide(),
-                    "detail": "answered from the entrance guide; no agent ran",
-                }
-            log(f"job {request_id}: answered from the entrance guide (no agent run)")
-            return self.send_json(202, {"request_id": request_id})
         with jobs_lock:
             jobs[request_id] = {"status": "working", "artifacts": []}
         threading.Thread(target=run_job, args=(request_id, desire), daemon=True).start()
