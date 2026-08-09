@@ -67,11 +67,31 @@ Contract:
 ```
 POST /api/requests      { "desire": "<prompt text>" }
                         -> 202 { "request_id": "..." }
-GET  /api/requests/{id} -> { "status": "working" | "done" | "failed",
+GET  /api/requests/{id} -> { "status": "working" | "done" | "failed"
+                                       | "answered",
                              "artifacts": [ { "kind": "image", "url": "<presigned URL>" } ],
+                             "reply": "<the capability card, present on answered>",
                              "detail": "<human-readable, present on failed>" }
+GET  /guide             -> service/GUIDE.md as text/plain (also /api/guide,
+                           which is the path reachable through agdevworld's
+                           same-origin passthrough)
 GET  /healthz           -> { "ok": true }
 ```
+
+### Entrance guide
+
+`POST /api/requests` is the single entrance, so "what can you do?" and
+"what does it cost?" arrive in the same `desire` field as the work
+(devpolicy/policy.md, *Entrance Guide*). A desire that is such a question
+is answered from `service/GUIDE.md` immediately and finishes `answered` —
+no agent run, no money, no wait. The card is re-read from disk per request,
+so editing it needs no restart.
+
+Recognising the question is a cheap regex (`is_guide_question`), never a
+model — asking what something costs must not itself cost a run. It is
+biased to *miss* a guide question (which then simply runs as a desire)
+rather than steal a real one: any generation verb vetoes the match, as does
+a desire longer than 200 characters.
 
 `kind` lets agforge later return music/video without breaking callers.
 Jobs are held **in memory only and vanish on service restart** — pollers of

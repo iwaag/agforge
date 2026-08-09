@@ -353,3 +353,72 @@ def test_http_bad_request_and_unknown_id(agent, server):
     assert status == 400
     status, body = http("GET", f"{server}/api/requests/doesnotexist")
     assert status == 404
+
+
+# --- entrance guide (agent_mindmap p2 step 4) --------------------------------
+#
+# The classifier is deliberately biased: missing a guide question only costs
+# an honest failed run, while stealing a real desire would refuse work the
+# caller asked for. These tests pin that bias, not a phrase list.
+
+@pytest.mark.parametrize(
+    "desire",
+    [
+        "what can you do?",
+        "What does it cost?",
+        "how much does an image cost",
+        "capabilities",
+        "何ができますか",
+        "いくらかかりますか？",
+    ],
+)
+def test_guide_questions_are_recognised(desire):
+    assert request_service.is_guide_question(desire)
+
+
+@pytest.mark.parametrize(
+    "desire",
+    [
+        "draw me a red lighthouse at dusk",
+        "can you draw a picture of a price tag?",
+        "a 512x512 PNG of a cat wearing a crown",
+        "generate a logo for a coffee shop, what does it cost? make it blue",
+        "赤い灯台の画像を作ってください",
+        # A long desire is work even if it opens with a question.
+        "what can you do with " + "a very detailed scene " * 20,
+    ],
+)
+def test_work_is_never_stolen_by_the_guide(desire):
+    assert not request_service.is_guide_question(desire)
+
+
+def test_a_guide_question_is_answered_without_an_agent_run(agent, server):
+    # The fake agent would hang for a second if it ran; the point is that the
+    # answer is there immediately and no run happened.
+    agent.sleep(1)
+    agent.output("RESULT_URL: http://x.example/a.png")
+    status, body = http("POST", f"{server}/api/requests", {"desire": "what does it cost?"})
+    assert status == 202
+    status, job = http("GET", f"{server}/api/requests/{body['request_id']}")
+    assert (status, job["status"]) == (200, "answered")
+    assert "what it costs" in job["reply"].lower()
+    assert job["artifacts"] == []
+    # Old clients understand only working/done/failed; give them a sentence.
+    assert "entrance guide" in job["detail"]
+
+
+def test_the_card_is_served_raw_and_re_read_per_request(agent, server, monkeypatch, tmp_path):
+    card = tmp_path / "GUIDE.md"
+    card.write_text("agforge makes one still image per request.\n")
+    monkeypatch.setattr(request_service, "GUIDE_PATH", card)
+    request = urllib.request.Request(f"{server}/guide")
+    with urllib.request.urlopen(request) as response:
+        assert response.read().decode() == "agforge makes one still image per request.\n"
+    card.write_text("and now it also makes music.\n")
+    with urllib.request.urlopen(urllib.request.Request(f"{server}/api/guide")) as response:
+        assert response.read().decode() == "and now it also makes music.\n"
+
+
+def test_a_missing_card_does_not_break_the_service(monkeypatch, tmp_path):
+    monkeypatch.setattr(request_service, "GUIDE_PATH", tmp_path / "absent.md")
+    assert "No capability card" in request_service.read_guide()
