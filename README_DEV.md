@@ -170,6 +170,20 @@ default `ollama`):
   When the ollama agent fails where claude succeeds, record the
   divergence — that contrast is a finding, not a defect to hide.
 
+Verified 2026-08-09 (agent_mindmap p2 step 5), same desire on both
+backends, both `done` with a verified URL — the run record is where the
+switch shows up:
+
+| backend | `cost_usd` | `duration_ms` | `num_turns` |
+|---|---|---|---|
+| `ollama` | 0.0 | 31151 | 5 |
+| `claude` | 0.1341148 | 18249 | 4 |
+
+`AGFORGE_CLAUDE_CMD` in `.local/.env` pins an absolute, version-numbered
+path into the VS Code extension directory; it goes stale on every
+extension update and the failure looks like an infra error, not a config
+one. Re-point it before blaming the backend.
+
 Observability (since agentify ex3): the ollama backend runs
 `opencode run --format json`, and the raw event stream (tool calls
 included) is saved per job to `.local/out/<request_id>.agent.jsonl`

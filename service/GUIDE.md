@@ -35,8 +35,8 @@ Measured on agstudio over the runs in `.local/out/service.log`
   loudly rather than hanging.
 - **Money: 0.00 USD on the default backend.** The agent runs on local
   ollama via opencode, which reports no price. Switched to
-  `AGFORGE_AGENT_BACKEND=claude` it costs whatever one `claude -p` run of
-  4–10 turns costs — recorded per run, not estimated here.
+  `AGFORGE_AGENT_BACKEND=claude`, the same desire measured **0.134 USD** in
+  4 turns and 18 seconds (2026-08-09) — recorded per run either way.
 - Image generation itself runs on local SwarmUI, so pixels are free; the
   download URL is presigned and expires (default 30 minutes) — fetch it
   before then.
