@@ -21,19 +21,9 @@ requirements are the caller's to enforce (unshackle_agent turn1). The
 `RESULT_URL:` marker scan was deleted in turn3 — it carried 0 of 23 runs
 across turns 1 and 2, so both ways of answering were one way.
 
-Backends, selected by AGFORGE_AGENT_BACKEND (process env or
-`.local/.env`, default `ollama`):
-
-- `ollama`: opencode headless (`opencode run`) against the local ollama
-  model. Tool grants come from `opencode.json` in the agforge root.
-  Binary and model: AGFORGE_OPENCODE_CMD, AGFORGE_OPENCODE_MODEL.
-- `claude`: scoped `claude -p` (model pinned below). NEVER
-  `--dangerously-skip-permissions` — this runs natively on the agstudio
-  Mac and local policy forbids it here.
-
-Test hook: AGFORGE_AGENT_CMD replaces the whole agent invocation with a
-command that reads the charter on stdin and prints agent-style output on
-stdout.
+The `generator` role resolves through `agents.toml` plus the git-ignored
+`.local/agents.local.toml`. Harness IDs and model IDs are canonical under
+`ag.agent-config.v1`; unavailable selections fail without fallback.
 
 CLI (manual runs): uv run service/agent_run.py "<desire>"
 prints the job dict on stdout; full agent output and meta go to stderr.
@@ -42,21 +32,23 @@ prints the job dict on stdout; full agent output and meta go to stderr.
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
 
+from agent_config import AgentConfigError, ResolvedAgent, load_config, resolve_role
+
 AGFORGE_ROOT = Path(__file__).resolve().parent.parent
 CHARTER_TEMPLATE = AGFORGE_ROOT / "service" / "charter.md"
+AGENTS_CONFIG = AGFORGE_ROOT / "agents.toml"
+AGENTS_LOCAL_CONFIG = AGFORGE_ROOT / ".local" / "agents.local.toml"
 
-CLAUDE_MODEL = "claude-sonnet-5"
 DEFAULT_BUDGET_SECONDS = 900
 OUTPUT_TAIL_CHARS = 800
 
-# Tool grant for the claude backend. Wide on purpose (Tool Giving): the
+# Tool grant for the Claude Code harness. Wide on purpose (Tool Giving): the
 # agent gets far more than the charter mentions, so it can reach for
 # whatever a desire actually needs. Still an allowlist, not `*` — these
 # runs are native on the developer's own Mac, where full-open would have
@@ -115,28 +107,15 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 class AgentRunError(Exception):
     """The agent run itself failed (infra); str() is the job detail."""
 
-
-def local_env(name: str) -> str | None:
-    """Resolve a config value: process env first, then `.local/.env`."""
-    if os.environ.get(name):
-        return os.environ[name]
-    env_file = AGFORGE_ROOT / ".local" / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line.startswith(f"{name}="):
-                value = line.partition("=")[2].strip()
-                if value:
-                    return value
-    return None
+    def __init__(self, message: str, meta: dict | None = None, outcome: str = "failed"):
+        self.meta = meta or {}
+        self.outcome = outcome
+        super().__init__(message)
 
 
-def agent_backend() -> str:
-    """Which agent backend runs the job: `ollama` (default) or `claude`."""
-    backend = local_env("AGFORGE_AGENT_BACKEND") or "ollama"
-    if backend not in ("ollama", "claude"):
-        raise AgentRunError(f"unknown AGFORGE_AGENT_BACKEND: {backend!r}")
-    return backend
+def resolve_generator(*, check_available: bool = True) -> ResolvedAgent:
+    config, overlay = load_config(AGENTS_CONFIG, AGENTS_LOCAL_CONFIG)
+    return resolve_role(config, overlay, "generator", check_available=check_available)
 
 
 def transcripts_dir() -> Path:
@@ -172,30 +151,23 @@ def compose_charter(
     )
 
 
-def build_argv() -> list[str]:
-    override = os.environ.get("AGFORGE_AGENT_CMD")
-    if override:
-        return shlex.split(override)
-    if agent_backend() == "claude":
-        claude = local_env("AGFORGE_CLAUDE_CMD") or "claude"
+def build_argv(agent: ResolvedAgent) -> list[str]:
+    if agent.harness == "claude_code":
         return [
-            claude,
+            agent.command,
             "-p",
             "--output-format",
             "json",
             "--model",
-            CLAUDE_MODEL,
+            agent.native_model,
             "--allowedTools",
             " ".join(CLAUDE_ALLOWED_TOOLS),
         ]
-    opencode = local_env("AGFORGE_OPENCODE_CMD") or "opencode"
+    if agent.harness == "fake":
+        return [agent.command]
     # --format json = raw JSON events (one per line): tool calls become
     # reviewable in the per-job transcript instead of final-message-only.
-    argv = [opencode, "run", "--format", "json"]
-    model = local_env("AGFORGE_OPENCODE_MODEL")
-    if model:
-        argv += ["-m", model]
-    return argv
+    return [agent.command, "run", "--format", "json", "-m", agent.model]
 
 
 def extract_event_text(raw: str) -> tuple[str, dict]:
@@ -210,6 +182,7 @@ def extract_event_text(raw: str) -> tuple[str, dict]:
     texts: list[str] = []
     turns = 0
     cost = 0.0
+    usage = {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0, "cache_write": 0}
     saw_event = False
     for line in raw.splitlines():
         stripped = line.strip()
@@ -231,12 +204,23 @@ def extract_event_text(raw: str) -> tuple[str, dict]:
             turns += 1
             if isinstance(part.get("cost"), (int, float)):
                 cost += part["cost"]
-    stats = {"num_turns": turns, "total_cost_usd": round(cost, 6)} if saw_event else {}
+            tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+            cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+            for source, target in (("input", "input"), ("output", "output"), ("reasoning", "reasoning")):
+                if isinstance(tokens.get(source), int):
+                    usage[target] += tokens[source]
+            for source, target in (("read", "cache_read"), ("write", "cache_write")):
+                if isinstance(cache.get(source), int):
+                    usage[target] += cache[source]
+    stats = {"num_turns": turns, "cost_usd": round(cost, 6), "usage": usage} if saw_event else {}
     return "\n".join(texts), stats
 
 
 def run_agent(
-    charter: str, timeout: float, transcript_path: Path | None = None
+    charter: str,
+    timeout: float,
+    agent: ResolvedAgent,
+    transcript_path: Path | None = None,
 ) -> tuple[str, dict]:
     """Run one headless agent over the charter; return (output_text, meta).
 
@@ -247,8 +231,14 @@ def run_agent(
     """
     if timeout <= 0:
         raise AgentRunError("agent run timed out (no budget left)")
-    argv = build_argv()
-    backend = "override" if os.environ.get("AGFORGE_AGENT_CMD") else agent_backend()
+    argv = build_argv(agent)
+    meta: dict = {
+        "role": agent.role,
+        "profile": agent.profile,
+        "harness": agent.harness,
+        "provider": agent.provider,
+        "model": agent.model,
+    }
 
     def save_transcript(raw: str) -> bool:
         if transcript_path and raw.strip():
@@ -258,6 +248,9 @@ def run_agent(
         return False
 
     started = time.monotonic()
+    process_env = {**os.environ, "NO_COLOR": "1"}
+    if agent.provider_base_url:
+        process_env[f"AGENT_PROVIDER_{agent.provider.upper()}_BASE_URL"] = agent.provider_base_url
     try:
         proc = subprocess.run(
             argv,
@@ -266,23 +259,22 @@ def run_agent(
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={**os.environ, "NO_COLOR": "1"},
+            env=process_env,
         )
     except subprocess.TimeoutExpired as error:
         save_transcript(error.stdout if isinstance(error.stdout, str) else "")
-        raise AgentRunError(f"agent run timed out after {int(timeout)}s")
+        meta["duration_ms"] = int((time.monotonic() - started) * 1000)
+        raise AgentRunError(f"agent run timed out after {int(timeout)}s", meta, "aborted")
     except OSError as error:
-        raise AgentRunError(f"could not launch agent ({argv[0]}): {error}")
-    meta: dict = {
-        "backend": backend,
-        "duration_ms": int((time.monotonic() - started) * 1000),
-    }
+        meta["duration_ms"] = int((time.monotonic() - started) * 1000)
+        raise AgentRunError(f"could not launch agent ({argv[0]}): {error}", meta)
+    meta["duration_ms"] = int((time.monotonic() - started) * 1000)
     raw = ANSI_RE.sub("", proc.stdout or "")
     if save_transcript(raw):
         meta["transcript"] = str(transcript_path)
     stderr_tail = ANSI_RE.sub("", proc.stderr or "").strip()[-OUTPUT_TAIL_CHARS:]
 
-    if backend == "claude":
+    if agent.harness == "claude_code":
         # claude -p --output-format json wraps the final message; copy the
         # cost-capture pattern from agautolab's claude_code adapter.
         try:
@@ -291,9 +283,13 @@ def run_agent(
             outer = None
         output = raw
         if isinstance(outer, dict):
-            for key in ("total_cost_usd", "duration_ms", "num_turns", "is_error", "subtype"):
+            for key in ("duration_ms", "num_turns", "is_error", "subtype"):
                 if key in outer:
                     meta[key] = outer[key]
+            if isinstance(outer.get("total_cost_usd"), (int, float)):
+                meta["cost_usd"] = outer["total_cost_usd"]
+            if isinstance(outer.get("usage"), dict):
+                meta["usage"] = outer["usage"]
             result = outer.get("result")
             output = result if isinstance(result, str) else ""
     else:
@@ -305,13 +301,34 @@ def run_agent(
         detail = f"agent exited {proc.returncode}: {tail}"
         if stderr_tail:
             detail += f"; stderr tail: {stderr_tail}"
-        raise AgentRunError(detail)
+        raise AgentRunError(detail, meta)
+    if meta.get("is_error"):
+        tail = output.strip()[-OUTPUT_TAIL_CHARS:] or "no output"
+        raise AgentRunError(f"agent reported an error ({meta.get('subtype')}): {tail}", meta)
     if not output.strip():
         detail = "agent produced no output"
         if stderr_tail:
             detail += f"; stderr tail: {stderr_tail}"
-        raise AgentRunError(detail)
+        raise AgentRunError(detail, meta)
     return output, meta
+
+
+def write_run_record(request_id: str, meta: dict, outcome: str, failure: str | None = None) -> Path:
+    """Persist canonical identity/outcome while leaving raw output in its transcript."""
+    record = {"schema": "ag.agent-run.v1", "request_id": request_id}
+    for key in (
+        "role", "profile", "harness", "provider", "model", "duration_ms",
+        "cost_usd", "usage", "num_turns", "transcript",
+    ):
+        if key in meta:
+            record[key] = meta[key]
+    record["outcome"] = outcome
+    if failure:
+        record["failure"] = failure
+    path = transcripts_dir() / f"{request_id}.agent-run.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def read_result(request_id: str) -> dict | None:
@@ -375,13 +392,16 @@ def run_request(
     charter = compose_charter(desire, request_id, budget_seconds)
     transcript_path = transcripts_dir() / f"{request_id}.agent.jsonl"
     try:
+        agent = resolve_generator()
         output, meta = run_agent(
-            charter, timeout=budget_seconds, transcript_path=transcript_path
+            charter, timeout=budget_seconds, agent=agent, transcript_path=transcript_path
         )
-    except AgentRunError as error:
-        meta = {"backend": "error"}
+    except (AgentConfigError, AgentRunError) as error:
+        meta = error.meta if isinstance(error, AgentRunError) else {}
         if transcript_path.exists():
             meta["transcript"] = str(transcript_path)
+        outcome = error.outcome if isinstance(error, AgentRunError) else "failed"
+        meta["run_record"] = str(write_run_record(request_id, meta, outcome, str(error)))
         result = read_result(request_id)
         if result is not None:
             meta["outcome_from"] = "result_file"
@@ -390,9 +410,12 @@ def run_request(
             job.setdefault("status", "ended")
             return job, meta
         return {"status": "failed", "detail": str(error)}, meta
-    meta["output"] = output
     job, source = resolve_outcome(request_id, output)
+    meta["output"] = output
     meta["outcome_from"] = source
+    outcome = "failed" if job.get("status") == "failed" else "done"
+    failure = str(job.get("detail")) if outcome == "failed" and job.get("detail") else None
+    meta["run_record"] = str(write_run_record(request_id, meta, outcome, failure))
     return job, meta
 
 

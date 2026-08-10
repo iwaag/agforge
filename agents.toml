@@ -1,0 +1,22 @@
+schema = "ag.agent-config.v1"
+project = "agforge"
+
+[models."ollama/qwen3.6:35b-a3b-coding-nvfp4"]
+
+[models."anthropic/claude-sonnet-5"]
+
+[profiles.local-coder]
+harness = "opencode"
+model = "ollama/qwen3.6:35b-a3b-coding-nvfp4"
+
+[profiles.sonnet-coder]
+harness = "claude_code"
+model = "anthropic/claude-sonnet-5"
+
+[profiles.stub]
+harness = "fake"
+model = "ollama/qwen3.6:35b-a3b-coding-nvfp4"
+
+[roles.generator]
+profile = "local-coder"
+requires = []

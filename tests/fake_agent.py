@@ -1,4 +1,5 @@
-"""Stub for AGFORGE_AGENT_CMD: replays canned agent output.
+#!/usr/bin/env python3
+"""Stub for the test-only `fake` harness: replays canned agent output.
 
 Mimics the runner's observable agent contract: charter on stdin, final
 output on stdout. Stdlib only.

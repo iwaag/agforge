@@ -29,8 +29,11 @@ workspace root).
 - `service/charter.md` — what the request agent is told. Re-read per
   request; wording changes need no restart. The main ENT tuning lever.
 - `service/GUIDE.md` — the capability/cost card, served at `GET /guide`.
-- `opencode.json` — tool grants for the ollama backend (wide allowlist,
-  deny by default). Claude-backend equivalent: `CLAUDE_ALLOWED_TOOLS` in
+- `agents.toml` — committed `ag.agent-config.v1` models, profiles, and the
+  `generator` role. `.local/agents.local.toml` supplies executable paths,
+  provider endpoints, and an optional local profile selection.
+- `opencode.json` — OpenCode tool grants (wide allowlist, deny by default).
+  Claude Code equivalent: `CLAUDE_ALLOWED_TOOLS` in
   `service/agent_run.py`.
 - `params/defaults.toml` — sample generation defaults.
 - `.local/` — git-ignored: `.env`, `devenv.md`, `out/` (images,
@@ -79,15 +82,17 @@ AGFORGE_S3_BUCKET=agforge  # agforge's own bucket
 AGFORGE_S3_ACCESS_KEY=
 AGFORGE_S3_SECRET_KEY=
 AGFORGE_SWARMUI_WIDTH= HEIGHT= STEPS= CFGSCALE= SEED=   # optional
-AGFORGE_AGENT_BACKEND=     # ollama (default) | claude
-AGFORGE_OPENCODE_CMD= AGFORGE_OPENCODE_MODEL=           # ollama backend
-AGFORGE_CLAUDE_CMD=        # claude backend; VSCode extension path goes
-                           # stale on every extension update
 ```
 
-Test/dev overrides: `AGFORGE_AGENT_CMD` (replaces the agent invocation),
-`AGFORGE_JOBS_DIR`, `AGFORGE_PROBLEMS_DIR`, `AGFORGE_TRANSCRIPTS_DIR`,
+Agent selection is not configured through `.env`. See `agents.toml`; local
+runtime facts use `.local/agents.local.toml`. Tests select the canonical
+`fake` profile. Directory/service test overrides remain
+`AGFORGE_JOBS_DIR`, `AGFORGE_PROBLEMS_DIR`, `AGFORGE_TRANSCRIPTS_DIR`, and
 `AGFORGE_SERVICE_PORT`.
+
+Each run keeps the raw `.agent.jsonl` transcript and a neighboring
+`.agent-run.json` record with role, profile, harness, provider, canonical
+model, outcome, duration, and usage/cost when reported.
 
 Actual values for this environment: `.local/.env`, `.local/devenv.md`.
 

@@ -4,14 +4,13 @@ Agent behavior itself is NOT unit-tested — it is observed live and
 recorded in episode reports. These tests pin only the shell around the
 one agentic run: charter composition, how the agent's answer is picked
 up, budget/timeout handling, and the HTTP surface, all through the
-AGFORGE_AGENT_CMD stub (tests/fake_agent.py).
+test-only `fake` profile (tests/fake_agent.py).
 
 Since unshackle_agent turn1 there is nothing here that asserts the agent
 said the right thing — the shell has no opinion about that any more.
 """
 
 import json
-import sys
 import threading
 import time
 import urllib.request
@@ -24,12 +23,32 @@ import agent_run
 import request_service
 
 TESTS_DIR = Path(__file__).resolve().parent
-FAKE_AGENT = f"{sys.executable} {TESTS_DIR / 'fake_agent.py'}"
+FAKE_AGENT = TESTS_DIR / "fake_agent.py"
 
 
 @pytest.fixture
 def agent(monkeypatch, tmp_path):
-    monkeypatch.setenv("AGFORGE_AGENT_CMD", FAKE_AGENT)
+    config = tmp_path / "agents.toml"
+    config.write_text(
+        '''schema = "ag.agent-config.v1"
+[models."ollama/test-model"]
+[profiles.stub]
+harness = "fake"
+model = "ollama/test-model"
+[roles.generator]
+profile = "stub"
+requires = []
+'''
+    )
+    overlay = tmp_path / "agents.local.toml"
+    overlay.write_text(
+        f'''schema = "ag.agent-config.v1"
+[local.harness.fake]
+command = "{FAKE_AGENT}"
+'''
+    )
+    monkeypatch.setattr(agent_run, "AGENTS_CONFIG", config)
+    monkeypatch.setattr(agent_run, "AGENTS_LOCAL_CONFIG", overlay)
     monkeypatch.setenv("AGFORGE_PROBLEMS_DIR", str(tmp_path / "problems"))
     monkeypatch.setenv("AGFORGE_TRANSCRIPTS_DIR", str(tmp_path / "transcripts"))
     monkeypatch.setenv("AGFORGE_JOBS_DIR", str(tmp_path / "jobs"))
@@ -202,7 +221,11 @@ def test_event_stream_yields_text_and_stats():
     ])
     text, stats = agent_run.extract_event_text(raw)
     assert text == "Generating now.\nUploaded and answered."
-    assert stats == {"num_turns": 2, "total_cost_usd": 0.03}
+    assert stats == {
+        "num_turns": 2,
+        "cost_usd": 0.03,
+        "usage": {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0, "cache_write": 0},
+    }
 
 
 def test_plain_text_passes_through_unchanged():
@@ -228,6 +251,25 @@ def test_transcript_written_and_pointed_at(agent):
     transcript = agent.transcript("feed0000feed0000")
     assert meta["transcript"] == str(transcript)
     assert "here is what I did" in transcript.read_text()
+
+
+def test_normalized_run_record_uses_canonical_identity(agent):
+    agent.output("completed")
+    _, meta = agent_run.run_request("d", request_id="face0000face0000")
+    record = json.loads(Path(meta["run_record"]).read_text())
+    assert record == {
+        "schema": "ag.agent-run.v1",
+        "request_id": "face0000face0000",
+        "role": "generator",
+        "profile": "stub",
+        "harness": "fake",
+        "provider": "ollama",
+        "model": "ollama/test-model",
+        "duration_ms": record["duration_ms"],
+        "transcript": str(agent.transcript("face0000face0000")),
+        "outcome": "done",
+    }
+    assert "backend" not in record
 
 
 def test_transcript_survives_infra_failure(agent):

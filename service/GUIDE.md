@@ -19,8 +19,8 @@ examples measured on agstudio across 2026-08-09/10; a number written here
 goes stale as runs accumulate, the files do not.
 
 - Time: ~15–130 s per request, most 35–45 s. Runs are killed at 900 s.
-- Money: 0.00 USD on the default backend (local ollama via opencode).
-  The same desire on `AGFORGE_AGENT_BACKEND=claude` measured 0.13–0.23 USD
+- Money: 0.00 USD on the `local-coder` profile (OpenCode with local Ollama).
+  The same desire on the `sonnet-coder` profile (Claude Code) measured 0.13–0.23 USD
   over 4–10 turns and 18–34 s. Recorded per run either way.
 - Pixels are free (local SwarmUI). Download URLs expire (default 60 min).
 
@@ -35,8 +35,11 @@ Capability and cost questions go in the same `desire` field as the work —
 one entrance. The agent reads this card to answer them, so a question
 costs a run like anything else.
 
-## Backend (Agent ≠ Model)
+## Agent profile (Agent ≠ Model)
 
-`AGFORGE_AGENT_BACKEND` = `ollama` (default) | `claude`, from the process
-env then `.local/.env`. Model within a backend: `AGFORGE_OPENCODE_MODEL`.
-Every run records which backend served it.
+The `generator` role selects a profile from `agents.toml`; this deployment
+may override that selection in `.local/agents.local.toml`. Standard profiles
+are `local-coder` (`opencode` + `ollama/qwen3.6:35b-a3b-coding-nvfp4`) and
+`sonnet-coder` (`claude_code` + `anthropic/claude-sonnet-5`). Every run
+records role, profile, harness, provider, and canonical model. An unavailable
+selection fails; it never falls back to another profile.

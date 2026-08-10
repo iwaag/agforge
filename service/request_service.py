@@ -30,8 +30,8 @@ not inspect it, score it, or decide whether the agent did well; a caller
 with requirements enforces its own.
 
 Run: scripts under service/ read no CLI args; port comes from
-AGFORGE_SERVICE_PORT (default 8092). Backend selection and test hook
-(AGFORGE_AGENT_CMD) live in service/agent_run.py.
+AGFORGE_SERVICE_PORT (default 8092). The generator profile is selected by
+`agents.toml` plus `.local/agents.local.toml`.
 """
 
 import json
@@ -77,10 +77,12 @@ def run_job(request_id: str, desire: str) -> None:
     )
     output = meta.pop("output", "")
     log(
-        f"job {request_id}: agent backend={meta.get('backend')} "
-        f"cost_usd={meta.get('total_cost_usd')} "
+        f"job {request_id}: agent role={meta.get('role')} profile={meta.get('profile')} "
+        f"harness={meta.get('harness')} provider={meta.get('provider')} model={meta.get('model')} "
+        f"cost_usd={meta.get('cost_usd')} "
         f"duration_ms={meta.get('duration_ms')} num_turns={meta.get('num_turns')} "
-        f"transcript={meta.get('transcript')} outcome_from={meta.get('outcome_from')}"
+        f"transcript={meta.get('transcript')} run_record={meta.get('run_record')} "
+        f"outcome_from={meta.get('outcome_from')}"
     )
     # The transcript is the observable agent behavior this episode collects;
     # keep it in the service log for later reading.
