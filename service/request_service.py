@@ -135,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         request_id = uuid.uuid4().hex
         with jobs_lock:
-            jobs[request_id] = {"status": "working", "artifacts": []}
+            jobs[request_id] = {"status": "working"}
         threading.Thread(target=run_job, args=(request_id, desire), daemon=True).start()
         return self.send_json(202, {"request_id": request_id})
 

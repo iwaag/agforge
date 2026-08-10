@@ -51,6 +51,10 @@ def agent(monkeypatch, tmp_path):
         def transcript(self, request_id: str) -> Path:
             return tmp_path / "transcripts" / f"{request_id}.agent.jsonl"
 
+        def writes_result_wherever_told(self, body) -> None:
+            """The agent answers at the path the charter named — id unknown here."""
+            monkeypatch.setenv("FAKE_AGENT_RESULT", json.dumps(body))
+
         def writes_result(self, request_id: str, body) -> Path:
             """Stand in for the agent writing its own answer to disk."""
             path = agent_run.result_path(request_id)
@@ -117,19 +121,23 @@ def test_result_file_is_served_unvalidated(agent):
     assert meta["outcome_from"] == "result_file"
 
 
-def test_result_file_wins_over_markers(agent):
+def test_the_file_is_the_answer_even_when_the_prose_disagrees(agent):
     agent.writes_result("bbbb0000bbbb0000", {"status": "failed", "detail": "I said so"})
-    agent.output("RESULT_URL: http://x.example/stale.png")
+    agent.output("actually here is a link: http://x.example/stale.png")
     job, _ = agent_run.run_request("d", request_id="bbbb0000bbbb0000")
-    assert job == {"status": "failed", "detail": "I said so", "artifacts": []}
+    assert job == {"status": "failed", "detail": "I said so"}
 
 
 def test_status_less_result_is_still_served(agent):
-    """The runner fills only what it alone knows: the run is over."""
+    """The runner fills only what it alone knows: the run is over.
+
+    Nothing else is added — turn3 deleted the `artifacts` default, which
+    no agent had used in 13 live runs.
+    """
     agent.writes_result("cccc0000cccc0000", {"reply": "just words"})
     agent.output("prose")
     job, _ = agent_run.run_request("d", request_id="cccc0000cccc0000")
-    assert job == {"reply": "just words", "status": "ended", "artifacts": []}
+    assert job == {"reply": "just words", "status": "ended"}
 
 
 def test_result_file_survives_a_dead_process(agent):
@@ -145,40 +153,23 @@ def test_result_file_survives_a_dead_process(agent):
     assert "agent exited 3" in meta["infra_error"]
 
 
-def test_unparseable_result_file_falls_through(agent):
+def test_unparseable_result_file_leaves_nothing_for_the_caller(agent):
     path = agent_run.result_path("eeee0000eeee0000")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("not json at all", encoding="utf-8")
-    agent.output("RESULT_URL: http://x.example/a.png")
+    agent.output("I wrote something odd.")
     job, meta = agent_run.run_request("d", request_id="eeee0000eeee0000")
-    assert job["status"] == "done"
-    assert meta["outcome_from"] == "markers"
+    assert job["status"] == "ended"
+    assert meta["outcome_from"] == "nothing"
+    assert "I wrote something odd." in job["detail"]
 
 
-# --- markers: the lenient alternative --------------------------------------
-
-def test_url_marker_tolerates_prose(agent):
-    agent.output("I generated the image.\n\nRESULT_URL: http://x.example/a.png?sig=1\nthanks!")
-    job, meta = agent_run.run_request("d")
-    assert job == {
-        "status": "done",
-        "artifacts": [{"kind": "image", "url": "http://x.example/a.png?sig=1"}],
-    }
-    assert meta["backend"] == "override"
-    assert meta["outcome_from"] == "markers"
-
-
-def test_failed_marker_tolerates_markdown_decoration(agent):
-    agent.output("**RESULT_FAILED:** cannot generate music")
-    job, _ = agent_run.run_request("d")
-    assert job == {"status": "failed", "detail": "cannot generate music"}
-
-
-def test_last_marker_wins(agent):
-    agent.output("RESULT_URL: http://x.example/draft.png\nRESULT_FAILED: upload broke")
-    job, _ = agent_run.run_request("d")
-    assert job["status"] == "failed"
-    assert job["detail"] == "upload broke"
+def test_the_agent_names_its_own_keys(agent):
+    """Six different key names appeared live in turn2; none is special."""
+    agent.writes_result("aced0000aced0000", {"outcome": "complete", "download": "http://x/y.zip"})
+    agent.output("prose")
+    job, _ = agent_run.run_request("d", request_id="aced0000aced0000")
+    assert job == {"outcome": "complete", "download": "http://x/y.zip", "status": "ended"}
 
 
 # --- nothing left for the caller -------------------------------------------
@@ -192,8 +183,8 @@ def test_no_answer_reports_the_fact_and_keeps_the_words(agent):
     assert meta["outcome_from"] == "nothing"
 
 
-def test_a_non_url_marker_is_not_an_answer(agent):
-    agent.output("RESULT_URL: (I will paste it here later)")
+def test_prose_alone_is_not_an_answer(agent):
+    agent.output("the link is somewhere in my message above, probably")
     job, _ = agent_run.run_request("d")
     assert job["status"] == "ended"
 
@@ -206,36 +197,37 @@ def test_event_stream_yields_text_and_stats():
         '{"type":"text","part":{"text":"Generating now."}}',
         '{"type":"tool","part":{"tool":"bash"}}',
         '{"type":"step_finish","part":{"cost":0.01}}',
-        '{"type":"text","part":{"text":"RESULT_URL: http://x.example/a.png"}}',
+        '{"type":"text","part":{"text":"Uploaded and answered."}}',
         '{"type":"step_finish","part":{"cost":0.02}}',
     ])
     text, stats = agent_run.extract_event_text(raw)
-    assert text == "Generating now.\nRESULT_URL: http://x.example/a.png"
+    assert text == "Generating now.\nUploaded and answered."
     assert stats == {"num_turns": 2, "total_cost_usd": 0.03}
 
 
 def test_plain_text_passes_through_unchanged():
-    raw = "just prose\nRESULT_FAILED: nope"
+    raw = "just prose\nand a second line of it"
     text, stats = agent_run.extract_event_text(raw)
     assert text == raw
     assert stats == {}
 
 
 def test_event_stream_outcome_parses_end_to_end(agent):
-    agent.output('{"type":"text","part":{"text":"RESULT_URL: http://x.example/a.png"}}')
+    agent.writes_result_wherever_told({"status": "done", "url": "http://x.example/a.png"})
+    agent.output('{"type":"text","part":{"text":"done, see the file"}}')
     job, meta = agent_run.run_request("d")
-    assert job["status"] == "done"
+    assert job == {"status": "done", "url": "http://x.example/a.png"}
     assert meta["num_turns"] == 0
 
 
 # --- transcript capture ----------------------------------------------------
 
 def test_transcript_written_and_pointed_at(agent):
-    agent.output("RESULT_URL: http://x.example/a.png")
+    agent.output("here is what I did, at length")
     _, meta = agent_run.run_request("d", request_id="feed0000feed0000")
     transcript = agent.transcript("feed0000feed0000")
     assert meta["transcript"] == str(transcript)
-    assert "RESULT_URL" in transcript.read_text()
+    assert "here is what I did" in transcript.read_text()
 
 
 def test_transcript_survives_infra_failure(agent):
@@ -274,7 +266,7 @@ def test_empty_output_keeps_stderr_tail(agent):
 
 
 def test_budget_timeout_fails_loudly(agent):
-    agent.output("RESULT_URL: http://x.example/too-late.png")
+    agent.output("too late to matter")
     agent.sleep(5)
     started = time.monotonic()
     job, _ = agent_run.run_request("d", budget_seconds=1)
@@ -286,11 +278,12 @@ def test_budget_timeout_fails_loudly(agent):
 # --- run_job mapping -------------------------------------------------------
 
 def test_run_job_publishes_what_the_agent_said(agent):
-    agent.output("RESULT_URL: http://x.example/a.png")
+    agent.writes_result("job1", {"status": "done", "image_url": "http://x.example/a.png"})
+    agent.output("prose")
     request_service.run_job("job1", "a dragon")
     assert request_service.jobs["job1"] == {
         "status": "done",
-        "artifacts": [{"kind": "image", "url": "http://x.example/a.png"}],
+        "image_url": "http://x.example/a.png",
     }
 
 
@@ -315,7 +308,8 @@ def http(method: str, url: str, body: dict | None = None) -> tuple[int, dict]:
 
 
 def test_http_contract_end_to_end(agent, server):
-    agent.output("RESULT_URL: http://x.example/a.png")
+    agent.writes_result_wherever_told({"status": "done", "url": "http://x.example/a.png"})
+    agent.output("answered in the file")
     status, body = http("GET", f"{server}/healthz")
     assert (status, body) == (200, {"ok": True})
 
@@ -330,13 +324,13 @@ def test_http_contract_end_to_end(agent, server):
         if job["status"] != "working":
             break
         time.sleep(0.05)
-    assert job["status"] == "done"
-    assert job["artifacts"] == [{"kind": "image", "url": "http://x.example/a.png"}]
+    assert job == {"status": "done", "url": "http://x.example/a.png"}
 
 
 def test_every_desire_reaches_the_agent(agent, server):
     """No classifier short-circuits a question any more; the agent answers."""
-    agent.output("RESULT_FAILED: I read the card and answered in words")
+    agent.writes_result_wherever_told({"status": "answered", "reply": "it costs nothing"})
+    agent.output("I read the card and answered in words")
     status, body = http("POST", f"{server}/api/requests", {"desire": "what does it cost?"})
     assert status == 202
     deadline = time.monotonic() + 10
@@ -345,8 +339,7 @@ def test_every_desire_reaches_the_agent(agent, server):
         if job["status"] != "working":
             break
         time.sleep(0.05)
-    assert job["status"] == "failed"
-    assert "read the card" in job["detail"]
+    assert job == {"status": "answered", "reply": "it costs nothing"}
 
 
 def test_http_bad_request_and_unknown_id(agent, server):

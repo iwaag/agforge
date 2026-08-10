@@ -10,6 +10,8 @@ Env contract:
     FAKE_AGENT_SLEEP       — seconds to sleep before answering (timeout tests).
     FAKE_AGENT_CHARTER_OUT — when set, write the received charter to this file
                              (lets tests assert charter composition end to end).
+    FAKE_AGENT_RESULT      — JSON to leave at the result path named in the
+                             charter, for tests that do not know the id.
 """
 
 import os
@@ -23,6 +25,14 @@ def main() -> None:
     out = os.environ.get("FAKE_AGENT_CHARTER_OUT")
     if out:
         Path(out).write_text(charter, encoding="utf-8")
+    result = os.environ.get("FAKE_AGENT_RESULT")
+    if result:
+        for token in charter.split():
+            if token.endswith("result.json"):
+                path = Path(token)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(result, encoding="utf-8")
+                break
     sleep = float(os.environ.get("FAKE_AGENT_SLEEP", "0"))
     if sleep:
         time.sleep(sleep)

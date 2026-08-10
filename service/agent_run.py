@@ -7,19 +7,19 @@
 Composes a charter prompt from `service/charter.md`, runs one headless
 agent over it, and serves whatever the agent left for the caller.
 
-The caller's answer is the agent's to write. It reads back, in order:
+The caller's answer is the agent's to write:
 
 1. `.local/jobs/<request_id>/result.json` — served **unvalidated**. The
-   agent decides what `status` means, what goes in `artifacts`, whether
-   to add a `reply`. No schema, no key whitelist, no coercion.
-2. `RESULT_URL:` / `RESULT_FAILED:` anywhere in the agent's words — a
-   lenient alternative, not a mandated path.
-3. Neither — the runner states the fact that the run ended with nothing
+   agent decides every key and every value. No schema, no key whitelist,
+   no coercion.
+2. Absent — the runner states the fact that the run ended with nothing
    for the caller, and carries the agent's own final words along.
 
 Nothing here judges whether the agent did well. A `status` this module
 fills in describes what reached the caller; the caller's own
-requirements are the caller's to enforce (unshackle_agent turn1).
+requirements are the caller's to enforce (unshackle_agent turn1). The
+`RESULT_URL:` marker scan was deleted in turn3 — it carried 0 of 23 runs
+across turns 1 and 2, so both ways of answering were one way.
 
 Backends, selected by AGFORGE_AGENT_BACKEND (process env or
 `.local/.env`, default `ollama`):
@@ -329,57 +329,29 @@ def read_result(request_id: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def scan_markers(output: str) -> dict | None:
-    """The lenient alternative: `RESULT_URL:` / `RESULT_FAILED:` in prose.
-
-    Scans every line for the last marker, tolerating surrounding prose
-    and markdown decoration. Returns None when there is no marker — an
-    absent marker is not an outcome, so nothing is decided here.
-    """
-    url = failed = None
-    for line in output.splitlines():
-        if "RESULT_URL:" in line:
-            candidate = line.rsplit("RESULT_URL:", 1)[1].strip().strip("*`> ")
-            if candidate.startswith("http"):
-                url, failed = candidate.split()[0], None
-        elif "RESULT_FAILED:" in line:
-            failed = line.rsplit("RESULT_FAILED:", 1)[1].strip().strip("*`> ")
-            url = None
-    if url:
-        return {"status": "done", "artifacts": [{"kind": "image", "url": url}]}
-    if failed is not None:
-        return {"status": "failed", "detail": failed[-OUTPUT_TAIL_CHARS:]}
-    return None
-
-
 def resolve_outcome(request_id: str, output: str) -> tuple[dict, str]:
     """What the caller receives, and where it came from.
 
-    Order: the agent's result file, then markers in its words, then the
-    plain fact that the run ended with nothing for the caller. The last
-    case is a statement about what reached the caller — never a verdict
-    on the run.
+    The agent's result file, or else the plain fact that the run ended
+    with nothing for the caller. The second case is a statement about
+    what reached the caller — never a verdict on the run.
     """
     result = read_result(request_id)
     if result is not None:
         job = dict(result)
-        # Fill only what is structurally absent. `status` says the run is
-        # over (the one thing the runner knows and the agent could not);
-        # `artifacts` is an empty container, not a claim.
+        # Fill only what is structurally absent: `status` says the run is
+        # over, the one thing the runner knows and the agent could not.
+        # Nothing else is added — 13 runs in turn2 invented six different
+        # key names for the answer and never once used `artifacts`.
         job.setdefault("status", "ended")
-        job.setdefault("artifacts", [])
         return job, "result_file"
-    markers = scan_markers(output)
-    if markers is not None:
-        return markers, "markers"
     tail = output.strip()[-OUTPUT_TAIL_CHARS:]
     return (
         {
             "status": "ended",
-            "artifacts": [],
             "detail": (
                 "the run ended and left nothing for the caller "
-                f"({result_path(request_id)} absent, no RESULT marker); "
+                f"({result_path(request_id)} absent); "
                 f"the agent's last words: {tail}"
             ),
         },
@@ -416,7 +388,6 @@ def run_request(
             meta["infra_error"] = str(error)
             job = dict(result)
             job.setdefault("status", "ended")
-            job.setdefault("artifacts", [])
             return job, meta
         return {"status": "failed", "detail": str(error)}, meta
     meta["output"] = output

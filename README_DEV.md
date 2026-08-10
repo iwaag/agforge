@@ -48,22 +48,25 @@ GET  /guide             -> service/GUIDE.md as text/plain (also /api/guide)
 GET  /healthz           -> { "ok": true }
 ```
 
-The agent writes `.local/jobs/<request_id>/result.json`; ending its final
-message with `RESULT_URL: <url>` / `RESULT_FAILED: <line>` is read too.
-With neither, the service reports that the run ended with nothing for the
-caller and passes the agent's last words along. Jobs live in memory and
-vanish on restart (pollers get 404 — re-request).
+The agent writes `.local/jobs/<request_id>/result.json` and every key in
+it is the agent's. Without it, the service reports that the run ended
+with nothing for the caller and passes the agent's last words along. The
+one field the runner adds is `status` when absent, meaning the run is
+over. Jobs live in memory and vanish on restart (pollers get 404 —
+re-request).
 
-agdevworld is the current caller and reads `status` (`working` → keep
-polling, `done` → success, anything else → error with `detail`) and the
-first `{"kind": "image", "url"}` in `artifacts`.
+agdevworld is the current caller. It reads the whole body with a model,
+not a schema, so no key here is agreed in advance (unshackle_agent
+turn2/turn3).
 
 ## Generation parameters
 
 `params/defaults.toml` → `.local/.env` → CLI flags, later wins. `model` is
 required (SwarmUI 0.9.7.4 rejects requests without it) and deliberately
 absent from `defaults.toml` — set `AGFORGE_SWARMUI_MODEL` or `--model`.
-Valid names: `POST /API/ListModels`. Everything else falls back to
+Valid names: `POST /API/ListModels` with a `session_id` from
+`POST /API/GetNewSession` and `{"path": "", "depth": 2}` — the call
+answers `missing session id` without one. Everything else falls back to
 SwarmUI's server defaults.
 
 ## `.local/.env` keys
