@@ -151,7 +151,7 @@ base_url = "http://ollama.example:11434/v1"
 def test_local_ace_studio_path_is_injected_without_sourcing_shell(tmp_path):
     env_file = tmp_path / "ace-studio.env"
     env_file.write_text('ACE_STUDIO_CLI="/Applications/ACE Studio.app/tool"\n')
-    assert agent_run._local_tool_environment(env_file) == {
+    assert agent_run._local_tool_environment(env_file, tmp_path / "absent") == {
         "ACE_STUDIO_CLI": "/Applications/ACE Studio.app/tool"
     }
 
@@ -159,7 +159,16 @@ def test_local_ace_studio_path_is_injected_without_sourcing_shell(tmp_path):
 def test_local_tool_environment_ignores_unrelated_keys(tmp_path):
     env_file = tmp_path / "ace-studio.env"
     env_file.write_text('SECRET="do-not-import"\n')
-    assert agent_run._local_tool_environment(env_file) == {}
+    assert agent_run._local_tool_environment(env_file, tmp_path / "absent") == {}
+
+
+def test_local_tool_bin_is_prepended_to_path(tmp_path):
+    env_file = tmp_path / "ace-studio.env"
+    env_file.write_text('ACE_STUDIO_CLI="/Applications/ACE Studio.app/tool"\n')
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    environment = agent_run._local_tool_environment(env_file, bin_dir)
+    assert environment["PATH"].split(os.pathsep, 1)[0] == str(bin_dir)
 
 
 def test_unavailable_selected_harness_fails_without_fallback(tmp_path):

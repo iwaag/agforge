@@ -39,8 +39,7 @@ CLAUDE_ALLOWED_TOOLS = (
     "Bash(printf:*)", "Bash(jq:*)", "Bash(date:*)", "Bash(env:*)",
     "Bash(which:*)", "Bash(mc:*)", "Bash(git status:*)",
     "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
-    'Bash("$ACE_STUDIO_CLI":*)', "Bash($ACE_STUDIO_CLI:*)",
-    'Bash("*/acestudio-cli":*)',
+    "Bash(acestudio-cli:*)",
     "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
 )
 
@@ -54,18 +53,26 @@ class AgentRunError(Exception):
         super().__init__(message)
 
 
-def _local_tool_environment(path: Path = ACE_STUDIO_ENV) -> dict[str, str]:
+def _local_tool_environment(
+    path: Path = ACE_STUDIO_ENV, bin_dir: Path | None = None
+) -> dict[str, str]:
     """Read the allowlisted host-local tool path without sourcing shell code."""
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
         return {}
+    environment: dict[str, str] = {}
     for line in lines:
         tokens = shlex.split(line, comments=True)
         if len(tokens) == 1 and tokens[0].startswith("ACE_STUDIO_CLI="):
             value = tokens[0].split("=", 1)[1]
-            return {"ACE_STUDIO_CLI": value} if value else {}
-    return {}
+            if value:
+                environment["ACE_STUDIO_CLI"] = value
+            break
+    local_bin = bin_dir if bin_dir is not None else AGFORGE_ROOT / ".local" / "bin"
+    if local_bin.is_dir():
+        environment["PATH"] = f"{local_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+    return environment
 
 
 def resolve_generator(*, check_available: bool = True) -> ResolvedAgent:

@@ -63,9 +63,7 @@
       "git log*": "allow",
       "git diff*": "allow",
       "git show*": "allow",
-      "\"$ACE_STUDIO_CLI\" *": "allow",
-      "$ACE_STUDIO_CLI *": "allow",
-      "\"*/acestudio-cli\" *": "allow"
+      "acestudio-cli *": "allow"
     }
   }
 }

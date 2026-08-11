@@ -31,13 +31,14 @@ character-for-character.
   its optional parameters. Call it with curl, then put the returned
   `audio_url` in your answer. It normally takes a few seconds after ACE-Step
   is warm.
-- ACE Studio CLI — use `$ACE_STUDIO_CLI` when the desire needs sung vocals or
+- ACE Studio CLI — use `acestudio-cli` when the desire needs sung vocals or
   lyrics rather than an instrumental. It controls the running ACE Studio app
-  and documents itself with `"$ACE_STUDIO_CLI" help` and
-  `"$ACE_STUDIO_CLI" help --search REGEX`; prefer `--json` commands. Its
-  host-local path comes from `.local/ace-studio.env` and is already present in
-  your environment: invoke it directly and do not `source` the file. For a
-  lyrics request, do not fall back to the instrumental `MUSIC_GEN_URL` path.
+  and documents itself with `acestudio-cli help` and
+  `acestudio-cli help --search REGEX`; prefer `--json` commands. The command is
+  already on your PATH through an ignored local symlink whose target comes
+  from `.local/ace-studio.env`; invoke `acestudio-cli` directly and do not
+  `source` the file. For a lyrics request, do not fall back to the instrumental
+  `MUSIC_GEN_URL` path.
   The public CLI has no export command; the known hand-off is stock singer →
   Sing clip → per-note kana with `language: JPN` → playback, then convert the
   newest `$TMPDIR/ACE Studio/AudioCache/seg_*_<sample-rate>.pcm` (float32
