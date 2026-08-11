@@ -1,6 +1,7 @@
 """ag.agent-config.v1 conformance and agforge argv resolution."""
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ import pytest
 import agent_config
 import agent_run
 
+
+EXAMPLES = Path(__file__).resolve().parents[3] / "devpolicy" / "contracts" / "agent" / "examples"
 
 BASE = '''schema = "ag.agent-config.v1"
 [models."ollama/local-model"]
@@ -31,6 +34,31 @@ def files(tmp_path: Path, committed: str = BASE, overlay: str | None = None):
     if overlay is not None:
         local.write_text(overlay)
     return main, local
+
+
+@pytest.mark.parametrize("project", ["agforge", "agautolab", "agdevworld"])
+def test_valid_shared_contract_examples(project):
+    main = EXAMPLES / "valid" / project / "agents.toml"
+    local = EXAMPLES / "valid" / project / "agents.local.toml"
+    config, overlay = agent_config.load_config(main, local if local.exists() else None)
+    for role in config.get("roles", {}):
+        resolved = agent_config.resolve_role(config, overlay, role, check_available=False)
+        assert resolved.role == role
+        assert resolved.harness in {"opencode", "claude_code", "fake"}
+
+
+@pytest.mark.parametrize("fixture", sorted((EXAMPLES / "invalid").glob("*.toml")),
+                         ids=lambda path: path.stem)
+def test_invalid_shared_contract_examples_report_expected_code(fixture):
+    expected = re.search(r"# EXPECT: (E_[A-Z_]+)", fixture.read_text()).group(1)
+    is_overlay = fixture.name.startswith("overlay-")
+    committed = EXAMPLES / "valid" / "agforge" / "agents.toml" if is_overlay else fixture
+    overlay = fixture if is_overlay else None
+    with pytest.raises(agent_config.AgentConfigError) as caught:
+        config, local = agent_config.load_config(committed, overlay)
+        for role in config.get("roles", {}):
+            agent_config.resolve_role(config, local, role, check_available=False)
+    assert caught.value.code == expected
 
 
 @pytest.mark.parametrize(
