@@ -23,7 +23,8 @@ workspace root).
   path on stderr.
 - `uv run service/transform.py [--format png|jpeg] [--width W --height H]
   <file>` — resize/convert/re-upload; fresh URL on the last line. No flags
-  = upload as-is.
+  = upload as-is. `service/transform.py` is a launcher for the
+  `agforge.transform` package module.
 - `service/serve.sh` — the request service on :8092
   (`AGFORGE_SERVICE_PORT`). Log: `.local/out/service.log`.
 - `service/charter.md` — what the request agent is told. Re-read per
@@ -34,7 +35,9 @@ workspace root).
   provider endpoints, and an optional local profile selection.
 - `opencode.json` — OpenCode tool grants (wide allowlist, deny by default).
   Claude Code equivalent: `CLAUDE_ALLOWED_TOOLS` in
-  `service/agent_run.py`.
+  `src/agforge/agent_run.py`.
+- `src/agforge/` — the installed application package. Files under `service/`
+  and `scripts/` are compatibility launchers or runtime documents.
 - `params/defaults.toml` — sample generation defaults.
 - `.local/` — git-ignored: `.env`, `devenv.md`, `out/` (images,
   transcripts, service log), `jobs/` (agent-written results),

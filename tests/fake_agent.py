@@ -37,7 +37,8 @@ def main() -> None:
     sleep = float(os.environ.get("FAKE_AGENT_SLEEP", "0"))
     if sleep:
         time.sleep(sleep)
-    print(os.environ.get("FAKE_AGENT_OUTPUT", ""))
+    echo_env = os.environ.get("FAKE_AGENT_ECHO_ENV")
+    print(os.environ.get(echo_env, "") if echo_env else os.environ.get("FAKE_AGENT_OUTPUT", ""))
     stderr = os.environ.get("FAKE_AGENT_STDERR")
     if stderr:
         print(stderr, file=sys.stderr)

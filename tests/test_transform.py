@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import transform
+from agforge import transform
 
 
 @pytest.fixture

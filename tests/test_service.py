@@ -18,9 +18,9 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from agag.agent_config import ResolvedAgent
 
-import agent_run
-import request_service
+from agforge import agent_run, request_service
 
 TESTS_DIR = Path(__file__).resolve().parent
 FAKE_AGENT = TESTS_DIR / "fake_agent.py"
@@ -241,6 +241,24 @@ def test_event_stream_outcome_parses_end_to_end(agent):
     job, meta = agent_run.run_request("d")
     assert job == {"status": "done", "url": "http://x.example/a.png"}
     assert meta["num_turns"] == 0
+
+
+def test_resolved_secret_environment_reaches_subprocess(agent, monkeypatch, tmp_path):
+    monkeypatch.setenv("FAKE_AGENT_ECHO_ENV", "ANTHROPIC_API_KEY")
+    resolved = ResolvedAgent(
+        role="generator",
+        profile="stub",
+        harness="fake",
+        provider="anthropic",
+        model="anthropic/test-model",
+        model_options={},
+        command=str(FAKE_AGENT),
+        provider_base_url=None,
+        environment={"ANTHROPIC_API_KEY": "injected-test-value"},
+    )
+    output, meta = agent_run.run_agent("charter", 5, resolved)
+    assert output.strip() == "injected-test-value"
+    assert meta["outcome"] == "done"
 
 
 # --- transcript capture ----------------------------------------------------

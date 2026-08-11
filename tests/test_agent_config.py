@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import agent_config
-import agent_run
+from agag import agent_config
+from agforge import agent_run
 
 
 EXAMPLES = Path(__file__).resolve().parents[3] / "devpolicy" / "contracts" / "agent" / "examples"

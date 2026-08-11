@@ -5,4 +5,3 @@ out/
 *.webp
 .venv/
 __pycache__/
-uv.lock
