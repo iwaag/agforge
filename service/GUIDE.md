@@ -8,7 +8,9 @@ request: edit it and the next answer changes, no restart.
 - One still image per request, from a free-text desire. One agentic run
   drives the generator, post-processes, and hands back a time-limited
   download URL.
-- Music, video, 3D, animation and multi-image are not implemented.
+- One music track per request through the LAN music-generation service. The
+  request agent fetches the service's own guide and returns its audio URL.
+- Video, 3D, animation and multi-image are not implemented.
 
 ## What it costs
 

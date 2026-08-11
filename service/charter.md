@@ -25,6 +25,12 @@ character-for-character.
   image via SwarmUI, uploads it, prints the presigned URL as the last
   line of stdout and the local path on stderr as `local: <path>`. Takes
   tens of seconds.
+- Music generation service — its base URL is `MUSIC_GEN_URL` in
+  `.local/music-gen.env`. Start with `source .local/music-gen.env` and fetch
+  `$MUSIC_GEN_URL/guide`; it documents the one `POST /generate` operation and
+  its optional parameters. Call it with curl, then put the returned
+  `audio_url` in your answer. It normally takes a few seconds after ACE-Step
+  is warm.
 - `uv run service/transform.py [--format png|jpeg] [--width W --height H]
   <file>` — resizes/converts a local image, uploads it, prints the fresh
   presigned URL last. No flags = upload as-is.
