@@ -36,7 +36,12 @@ character-for-character.
   and documents itself with `"$ACE_STUDIO_CLI" help` and
   `"$ACE_STUDIO_CLI" help --search REGEX`; prefer `--json` commands. Its
   host-local path comes from `.local/ace-studio.env` and is already present in
-  your environment.
+  your environment: invoke it directly and do not `source` the file. For a
+  lyrics request, do not fall back to the instrumental `MUSIC_GEN_URL` path.
+  The public CLI has no export command; the known hand-off is stock singer →
+  Sing clip → per-note kana with `language: JPN` → playback, then convert the
+  newest `$TMPDIR/ACE Studio/AudioCache/seg_*_<sample-rate>.pcm` (float32
+  planar dual-mono) to a mono WAV and upload it with `service/transform.py`.
 - `uv run service/transform.py [--format png|jpeg] [--width W --height H]
   <file>` — resizes/converts a local image, uploads it, prints the fresh
   presigned URL last. No flags = upload as-is.
