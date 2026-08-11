@@ -40,6 +40,7 @@ CLAUDE_ALLOWED_TOOLS = (
     "Bash(which:*)", "Bash(mc:*)", "Bash(git status:*)",
     "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
     'Bash("$ACE_STUDIO_CLI":*)', "Bash($ACE_STUDIO_CLI:*)",
+    'Bash("*/acestudio-cli":*)',
     "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
 )
 
