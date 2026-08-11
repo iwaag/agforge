@@ -31,6 +31,12 @@ character-for-character.
   its optional parameters. Call it with curl, then put the returned
   `audio_url` in your answer. It normally takes a few seconds after ACE-Step
   is warm.
+- ACE Studio CLI — use `$ACE_STUDIO_CLI` when the desire needs sung vocals or
+  lyrics rather than an instrumental. It controls the running ACE Studio app
+  and documents itself with `"$ACE_STUDIO_CLI" help` and
+  `"$ACE_STUDIO_CLI" help --search REGEX`; prefer `--json` commands. Its
+  host-local path comes from `.local/ace-studio.env` and is already present in
+  your environment.
 - `uv run service/transform.py [--format png|jpeg] [--width W --height H]
   <file>` — resizes/converts a local image, uploads it, prints the fresh
   presigned URL last. No flags = upload as-is.

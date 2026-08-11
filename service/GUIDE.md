@@ -10,6 +10,9 @@ request: edit it and the next answer changes, no restart.
   download URL.
 - One music track per request through the LAN music-generation service. The
   request agent fetches the service's own guide and returns its audio URL.
+- Sung vocals with lyrics through the running ACE Studio desktop app and its
+  self-describing CLI. This path uses a stock ACE Studio voice; the agent does
+  not clone or upload voices.
 - Video, 3D, animation and multi-image are not implemented.
 
 ## What it costs

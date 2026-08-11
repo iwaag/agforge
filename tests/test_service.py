@@ -96,6 +96,7 @@ def test_charter_tells_the_agent_where_things_are(agent):
     assert "a red dragon, 512x512" in charter          # desire, verbatim
     assert "abcdef0123456789" in charter               # request id
     assert "scripts/generate.sh" in charter            # the generation tool
+    assert "ACE_STUDIO_CLI" in charter                 # the vocal-synthesis tool
     assert "service/transform.py" in charter           # the post-processing tool
     assert "service/GUIDE.md" in charter               # the capability card
     assert str(agent_run.result_path("abcdef0123456789")) in charter

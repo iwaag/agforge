@@ -148,6 +148,20 @@ base_url = "http://ollama.example:11434/v1"
     assert resolved.provider_base_url == "http://ollama.example:11434/v1"
 
 
+def test_local_ace_studio_path_is_injected_without_sourcing_shell(tmp_path):
+    env_file = tmp_path / "ace-studio.env"
+    env_file.write_text('ACE_STUDIO_CLI="/Applications/ACE Studio.app/tool"\n')
+    assert agent_run._local_tool_environment(env_file) == {
+        "ACE_STUDIO_CLI": "/Applications/ACE Studio.app/tool"
+    }
+
+
+def test_local_tool_environment_ignores_unrelated_keys(tmp_path):
+    env_file = tmp_path / "ace-studio.env"
+    env_file.write_text('SECRET="do-not-import"\n')
+    assert agent_run._local_tool_environment(env_file) == {}
+
+
 def test_unavailable_selected_harness_fails_without_fallback(tmp_path):
     overlay_body = '''schema = "ag.agent-config.v1"
 [local.harness.opencode]

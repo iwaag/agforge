@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from agag.agent_config import AgentConfigError, ResolvedAgent, load_config, resolve_role
@@ -20,6 +22,7 @@ AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 CHARTER_TEMPLATE = AGFORGE_ROOT / "service" / "charter.md"
 AGENTS_CONFIG = AGFORGE_ROOT / "agents.toml"
 AGENTS_LOCAL_CONFIG = AGFORGE_ROOT / ".local" / "agents.local.toml"
+ACE_STUDIO_ENV = AGFORGE_ROOT / ".local" / "ace-studio.env"
 
 DEFAULT_BUDGET_SECONDS = 900
 OUTPUT_TAIL_CHARS = 800
@@ -36,6 +39,7 @@ CLAUDE_ALLOWED_TOOLS = (
     "Bash(printf:*)", "Bash(jq:*)", "Bash(date:*)", "Bash(env:*)",
     "Bash(which:*)", "Bash(mc:*)", "Bash(git status:*)",
     "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
+    'Bash("$ACE_STUDIO_CLI":*)', "Bash($ACE_STUDIO_CLI:*)",
     "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
 )
 
@@ -49,12 +53,27 @@ class AgentRunError(Exception):
         super().__init__(message)
 
 
+def _local_tool_environment(path: Path = ACE_STUDIO_ENV) -> dict[str, str]:
+    """Read the allowlisted host-local tool path without sourcing shell code."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return {}
+    for line in lines:
+        tokens = shlex.split(line, comments=True)
+        if len(tokens) == 1 and tokens[0].startswith("ACE_STUDIO_CLI="):
+            value = tokens[0].split("=", 1)[1]
+            return {"ACE_STUDIO_CLI": value} if value else {}
+    return {}
+
+
 def resolve_generator(*, check_available: bool = True) -> ResolvedAgent:
     config, overlay = load_config(AGENTS_CONFIG, AGENTS_LOCAL_CONFIG)
-    return resolve_role(
+    agent = resolve_role(
         config, overlay, "generator", check_available=check_available,
         project_name="agforge",
     )
+    return replace(agent, environment={**agent.environment, **_local_tool_environment()})
 
 
 def transcripts_dir() -> Path:
