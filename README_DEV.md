@@ -27,6 +27,10 @@ workspace root).
   `agforge.transform` package module.
 - `service/serve.sh` — the request service on :8092
   (`AGFORGE_SERVICE_PORT`). Log: `.local/out/service.log`.
+- `service/listen.sh` — the Zulip chat entrance: long-polls for DMs to the
+  forge bot and answers each one with a run of the same pipeline. Credentials
+  in `.local/zulip.env`, log `.local/out/zulip-listener.log`. Set
+  `AGFORGE_ZULIP_LOG_ONLY=1` to watch without answering.
 - `service/charter.md` — what the request agent is told. Re-read per
   request; wording changes need no restart. The main ENT tuning lever.
 - `service/GUIDE.md` — the capability/cost card, served at `GET /guide`.
@@ -64,6 +68,16 @@ re-request).
 agdevworld is the current caller. It reads the whole body with a model,
 not a schema, so no key here is agreed in advance (unshackle_agent
 turn2/turn3).
+
+## Chat contract
+
+The Zulip listener is the second entrance, added in the `zulip_receive`
+episode. A DM to the forge bot becomes one `agent_run.run_request()` — the
+same pipeline as `:8092`, called in-process, so one charter and one run
+record cover both entrances. The desire it receives is the visible DM
+conversation as a speaker-labelled transcript; `service/GUIDE.md` documents
+that format and the `reply` field the run is asked to write. Two entrances is
+a temporary state: chat is meant to become the single one.
 
 ## Generation parameters
 

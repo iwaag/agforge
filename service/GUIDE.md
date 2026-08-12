@@ -40,6 +40,32 @@ Capability and cost questions go in the same `desire` field as the work —
 one entrance. The agent reads this card to answer them, so a question
 costs a run like anything else.
 
+## Talking to it in chat
+
+agforge also answers Zulip direct messages sent to its bot account. A DM
+starts one run of the same pipeline; there is no separate chat agent.
+
+What the run receives as its desire is the **visible DM conversation**, not
+just the newest line: up to 50 messages, oldest first, raw text, one line per
+message, labelled with the speaker's display name. The bot's own earlier
+replies are labelled `(you)`; its "on it" acks are stripped out.
+
+```
+[Developer] make me a small icon of a red bird
+[Forge (you)] here's a small red bird icon: http://…
+[Developer] same bird but blue
+```
+
+The last line is the message to answer; the earlier lines are there so that
+"same bird but blue" means something. Not every message is a generation
+request — a question is answered as a question.
+
+The answer goes back as a DM. The run writes its usual `result.json`, and the
+text of a **`reply`** field in it is what gets posted. That field is a request,
+not a schema: without it the whole JSON is posted verbatim, which is correct
+but reads badly in a chat window. URLs are pasted as-is, so they must be
+complete and unmodified.
+
 ## Agent profile (Agent ≠ Model)
 
 The `generator` role selects a profile from `agents.toml`; this deployment
