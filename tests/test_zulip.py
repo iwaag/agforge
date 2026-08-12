@@ -3,11 +3,17 @@
 Same rule as test_service.py: nothing here asserts what the agent said.
 These pin the shell around the chat route — self-echo filtering, transcript
 assembly, and how the agent's answer becomes a chat message.
+
+The client and the listener loop themselves live in `agag.zulip` and are
+tested there; the two generic assertions kept below are the ones the chat
+route's correctness rests on.
 """
 
 import json
 
-from agforge import zulip, zulip_chat, zulip_listener
+from agag import zulip
+
+from agforge import zulip_chat
 
 BOT_ID = 13
 HUMAN_ID = 8
@@ -25,14 +31,14 @@ def dm(sender_id, content, recipients=(BOT_ID, HUMAN_ID), full_name="Developer")
 
 
 def test_own_messages_are_not_reacted_to():
-    assert zulip_listener.is_dm_for_us(dm(HUMAN_ID, "hi"), BOT_ID)
-    assert not zulip_listener.is_dm_for_us(dm(BOT_ID, "hi back"), BOT_ID)
+    assert zulip.is_dm_for_us(dm(HUMAN_ID, "hi"), BOT_ID)
+    assert not zulip.is_dm_for_us(dm(BOT_ID, "hi back"), BOT_ID)
 
 
 def test_stream_messages_are_ignored():
     message = dm(HUMAN_ID, "hi")
     message["type"] = "stream"
-    assert not zulip_listener.is_dm_for_us(message, BOT_ID)
+    assert not zulip.is_dm_for_us(message, BOT_ID)
 
 
 def test_dm_partners_excludes_the_bot():
@@ -73,12 +79,3 @@ def test_reply_falls_back_to_the_whole_answer():
     job = {"status": "ended", "asset": {"url": "http://example.invalid/x.png"}}
     text = zulip_chat.reply_text(job)
     assert json.loads(text.removeprefix("```json").removesuffix("```")) == job
-
-
-def test_env_reader_ignores_comments_and_blank_lines(tmp_path):
-    path = tmp_path / "zulip.env"
-    path.write_text("# a comment\n\nZULIP_URL=https://example.invalid\nZULIP_EMAIL=b@c.invalid\n")
-    assert zulip.read_env(path) == {
-        "ZULIP_URL": "https://example.invalid",
-        "ZULIP_EMAIL": "b@c.invalid",
-    }

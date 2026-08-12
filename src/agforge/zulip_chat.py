@@ -12,8 +12,9 @@ import json
 import threading
 import uuid
 
+from agag.zulip import ZulipClient, dm_partners
+
 from . import agent_run
-from .zulip import ZulipClient, dm_partners
 
 HISTORY_MESSAGES = 50
 ACK_PREFIX = "On it — working on this now."
