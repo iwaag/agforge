@@ -1,9 +1,10 @@
-"""Turn a Zulip DM into one agforge agentic run and DM the answer back.
+"""Turn a Zulip message into one agforge agentic run and answer in place.
 
 The chat entrance reuses the same pipeline as the `:8092` request service
 (`agent_run.run_request`): one charter, one agent, one `result.json`, one run
 record. What is new here is the shape of the desire — a speaker-labeled
-transcript of the visible DM conversation instead of a bare prompt.
+transcript of the visible conversation (a DM narrow, or a channel topic)
+instead of a bare prompt.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import json
 import threading
 import uuid
 
-from agag.zulip import ZulipClient, dm_partners
+from agag.zulip import ZulipClient, channel_name, dm_partners
 
 from . import agent_run
 
@@ -21,8 +22,8 @@ ACK_PREFIX = "On it — working on this now."
 ACK_TEMPLATE = ACK_PREFIX + " (run `{request_id}`)"
 
 DESIRE_TEMPLATE = """\
-This request arrived as a Zulip direct message. You are talking with a person
-in a chat window, so answer like a chat reply: short, plain, no preamble.
+This request arrived in a Zulip chat. You are talking with people in a chat
+window, so answer like a chat reply: short, plain, no preamble.
 
 Recent conversation, oldest first, exactly as the participants see it on
 screen. Lines marked "(you)" are your own earlier replies:
@@ -66,12 +67,36 @@ def reply_text(job: dict) -> str:
     return "```json\n" + json.dumps(job, ensure_ascii=False, indent=2) + "\n```"
 
 
-def run_and_reply(client: ZulipClient, partners: list[int], self_id: int, log) -> None:
+def conversation(client: ZulipClient, message: dict, self_id: int):
+    """Where this message lives: (history_fn, send_fn, label), or None.
+
+    A DM's conversation is its partner narrow; a channel message's is its
+    topic. Both read the last `HISTORY_MESSAGES` messages and answer in place.
+    """
+    if message.get("type") == "stream":
+        channel = channel_name(message)
+        topic = str(message.get("subject", ""))
+        return (
+            lambda n: client.topic_history(channel, topic, num_before=n),
+            lambda text: client.send_to_channel(channel, topic, text),
+            f"channel={channel!r} topic={topic!r}",
+        )
+    partners = dm_partners(message, self_id)
+    if not partners:
+        return None
+    return (
+        lambda n: client.dm_history(partners, num_before=n),
+        lambda text: client.send_dm(partners, text),
+        f"partners={partners}",
+    )
+
+
+def run_and_reply(history_fn, send_fn, label: str, self_id: int, log) -> None:
     request_id = uuid.uuid4().hex
-    history = client.dm_history(partners, num_before=HISTORY_MESSAGES)
+    history = history_fn(HISTORY_MESSAGES)
     transcript = format_transcript(history, self_id)
-    client.send_dm(partners, ACK_TEMPLATE.format(request_id=request_id))
-    log(f"chat run {request_id}: {len(history)} messages of context, partners={partners}")
+    send_fn(ACK_TEMPLATE.format(request_id=request_id))
+    log(f"chat run {request_id}: {len(history)} messages of context, {label}")
     job, meta = agent_run.run_request(compose_desire(transcript), request_id=request_id)
     meta.pop("output", "")
     log(
@@ -80,24 +105,25 @@ def run_and_reply(client: ZulipClient, partners: list[int], self_id: int, log) -
         f"cost_usd={meta.get('cost_usd')} duration_ms={meta.get('duration_ms')} "
         f"status={job.get('status')} outcome_from={meta.get('outcome_from')}"
     )
-    client.send_dm(partners, reply_text(job))
+    send_fn(reply_text(job))
 
 
 def react(client: ZulipClient, message: dict, self_id: int) -> None:
-    """Listener handler: answer this DM in its own thread."""
+    """Listener handler: answer this message, in place, in its own thread."""
     from .zulip_listener import log
 
-    partners = dm_partners(message, self_id)
-    if not partners:
+    place = conversation(client, message, self_id)
+    if place is None:
         return
+    history_fn, send_fn, label = place
 
     def worker() -> None:
         try:
-            run_and_reply(client, partners, self_id, log)
+            run_and_reply(history_fn, send_fn, label, self_id, log)
         except Exception as error:
             log(f"chat run failed: {error!r}")
             try:
-                client.send_dm(partners, f"Something broke on my side: {error}")
+                send_fn(f"Something broke on my side: {error}")
             except Exception as send_error:
                 log(f"could not report the failure to the chat: {send_error!r}")
 

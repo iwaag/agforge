@@ -24,4 +24,6 @@ build-backend = "hatchling.build"
 packages = ["src/agforge"]
 
 [tool.uv.sources]
-pyagag = { git = "https://github.com/iwaag/pyagag.git", branch = "main" }
+# TEMP (zulip_channel_topic): local editable source until the pyagag channel
+# mechanics are pushed; then restore the git source and re-lock.
+pyagag = { path = "../../pyagag", editable = true }

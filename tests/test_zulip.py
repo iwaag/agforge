@@ -47,6 +47,63 @@ def test_dm_partners_excludes_the_bot():
     assert zulip.dm_partners(group, BOT_ID) == [HUMAN_ID, 9]
 
 
+def channel_message(sender_id, content, channel="create-20260812-x", topic="request"):
+    return {
+        "id": 2,
+        "type": "stream",
+        "sender_id": sender_id,
+        "sender_full_name": "Forge" if sender_id == BOT_ID else "Devworld Assistant",
+        "content": content,
+        "display_recipient": channel,
+        "subject": topic,
+    }
+
+
+def test_accept_takes_dms_and_live_request_channel_topics():
+    from agforge.zulip_listener import accept
+
+    assert accept(dm(HUMAN_ID, "hi"), BOT_ID)
+    assert accept(channel_message(HUMAN_ID, "make a bird"), BOT_ID)
+    assert not accept(channel_message(BOT_ID, "own echo"), BOT_ID)
+    assert not accept(channel_message(HUMAN_ID, "chatter", channel="FreeForge"), BOT_ID)
+    assert not accept(
+        channel_message(HUMAN_ID, "late reply", topic=f"{zulip.RESOLVED_TOPIC_PREFIX}request"),
+        BOT_ID,
+    )
+
+
+def test_conversation_answers_a_channel_message_in_its_topic():
+    sent = []
+
+    class Client:
+        def topic_history(self, channel, topic, num_before):
+            assert (channel, topic) == ("create-20260812-x", "request")
+            return [channel_message(HUMAN_ID, "make a bird")]
+
+        def send_to_channel(self, channel, topic, text):
+            sent.append((channel, topic, text))
+
+    place = zulip_chat.conversation(Client(), channel_message(HUMAN_ID, "make a bird"), BOT_ID)
+    history_fn, send_fn, label = place
+    assert [m["content"] for m in history_fn(50)] == ["make a bird"]
+    send_fn("here you go")
+    assert sent == [("create-20260812-x", "request", "here you go")]
+    assert "create-20260812-x" in label
+
+
+def test_conversation_falls_back_to_the_dm_narrow():
+    class Client:
+        def dm_history(self, partners, num_before):
+            return []
+
+        def send_dm(self, partners, text):
+            pass
+
+    assert zulip_chat.conversation(Client(), dm(HUMAN_ID, "hi"), BOT_ID) is not None
+    lonely = dm(BOT_ID, "echo", recipients=(BOT_ID,))
+    assert zulip_chat.conversation(Client(), lonely, BOT_ID) is None
+
+
 def test_transcript_labels_speakers_and_drops_acks():
     transcript = zulip_chat.format_transcript(
         [
