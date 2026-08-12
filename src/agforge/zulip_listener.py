@@ -3,9 +3,14 @@
 The mechanics live in `agag.zulip`, shared with the other agents' listeners
 (client, self-loop guard, queue re-registration, restart survival). What is
 agforge's own is the credentials path, the handler, and the acceptance rule:
-DMs as before, plus messages in `create-*` request channels (the
-zulip_channel_topic workflow) whose topic is not yet resolved. `#FreeForge`
-itself is deliberately not accepted — announcements live there.
+DMs as before, plus channel messages whose *topic* is a `create-*` request
+(the zulip_channel_topic workflow). The rule is topic-based and
+channel-agnostic on purpose: every subscribed agent sees every event, and
+each one's own accept rule is what keeps irrelevant topics from starting a
+run — a future shared project channel can carry agforge's topics next to
+other agents' without anyone reacting to traffic that is not theirs.
+Resolving a topic renames it to `✔ create-…`, which stops matching the
+prefix, so a finished conversation goes quiet for free.
 """
 
 from __future__ import annotations
@@ -14,7 +19,6 @@ import os
 from pathlib import Path
 
 from agag.zulip import (
-    RESOLVED_TOPIC_PREFIX,
     ZulipClient,
     channel_name,
     dm_partners,
@@ -27,21 +31,20 @@ from agag.zulip import (
 AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 ZULIP_ENV = AGFORGE_ROOT / ".local" / "zulip.env"
 
-# Request channels created per the zulip_channel_topic workflow.
-REQUEST_CHANNEL_PREFIX = "create-"
+# Request topics per the zulip_channel_topic workflow. A resolved topic is
+# renamed "✔ create-…" and stops matching on its own.
+REQUEST_TOPIC_PREFIX = "create-"
 
 __all__ = ["ZULIP_ENV", "accept", "handle_message", "log", "main"]
 
 
 def accept(message: dict, self_id: int) -> bool:
-    """DMs, and live topics in request channels. Resolved topics are done."""
+    """DMs, and channel messages in a live `create-*` request topic."""
     if is_dm_for_us(message, self_id):
         return True
-    return (
-        is_channel_message_for_us(message, self_id)
-        and channel_name(message).startswith(REQUEST_CHANNEL_PREFIX)
-        and not str(message.get("subject", "")).startswith(RESOLVED_TOPIC_PREFIX)
-    )
+    return is_channel_message_for_us(message, self_id) and str(
+        message.get("subject", "")
+    ).startswith(REQUEST_TOPIC_PREFIX)
 
 
 def handle_message(client: ZulipClient, message: dict, self_id: int) -> None:

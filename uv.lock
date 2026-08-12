@@ -22,7 +22,7 @@ dev = [
 requires-dist = [
     { name = "boto3" },
     { name = "pillow" },
-    { name = "pyagag", editable = "../../pyagag" },
+    { name = "pyagag", git = "https://github.com/iwaag/pyagag.git?branch=main" },
     { name = "requests" },
 ]
 
@@ -282,12 +282,7 @@ wheels = [
 [[package]]
 name = "pyagag"
 version = "0.1.0"
-source = { editable = "../../pyagag" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
+source = { git = "https://github.com/iwaag/pyagag.git?branch=main#4088bd2ef4fa7fdb138c15c98617d6915a5b6d8b" }
 
 [[package]]
 name = "pygments"

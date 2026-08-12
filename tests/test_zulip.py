@@ -47,7 +47,7 @@ def test_dm_partners_excludes_the_bot():
     assert zulip.dm_partners(group, BOT_ID) == [HUMAN_ID, 9]
 
 
-def channel_message(sender_id, content, channel="create-20260812-x", topic="request"):
+def channel_message(sender_id, content, channel="FreeForge", topic="create-20260812-x"):
     return {
         "id": 2,
         "type": "stream",
@@ -59,15 +59,19 @@ def channel_message(sender_id, content, channel="create-20260812-x", topic="requ
     }
 
 
-def test_accept_takes_dms_and_live_request_channel_topics():
+def test_accept_takes_dms_and_live_request_topics():
     from agforge.zulip_listener import accept
 
     assert accept(dm(HUMAN_ID, "hi"), BOT_ID)
     assert accept(channel_message(HUMAN_ID, "make a bird"), BOT_ID)
+    # topic-based, channel-agnostic: a future project channel works unchanged
+    assert accept(channel_message(HUMAN_ID, "make a bird", channel="project-x"), BOT_ID)
     assert not accept(channel_message(BOT_ID, "own echo"), BOT_ID)
-    assert not accept(channel_message(HUMAN_ID, "chatter", channel="FreeForge"), BOT_ID)
+    assert not accept(channel_message(HUMAN_ID, "chatter", topic="requests"), BOT_ID)
     assert not accept(
-        channel_message(HUMAN_ID, "late reply", topic=f"{zulip.RESOLVED_TOPIC_PREFIX}request"),
+        channel_message(
+            HUMAN_ID, "late reply", topic=f"{zulip.RESOLVED_TOPIC_PREFIX}create-20260812-x"
+        ),
         BOT_ID,
     )
 
@@ -77,7 +81,7 @@ def test_conversation_answers_a_channel_message_in_its_topic():
 
     class Client:
         def topic_history(self, channel, topic, num_before):
-            assert (channel, topic) == ("create-20260812-x", "request")
+            assert (channel, topic) == ("FreeForge", "create-20260812-x")
             return [channel_message(HUMAN_ID, "make a bird")]
 
         def send_to_channel(self, channel, topic, text):
@@ -87,7 +91,7 @@ def test_conversation_answers_a_channel_message_in_its_topic():
     history_fn, send_fn, label = place
     assert [m["content"] for m in history_fn(50)] == ["make a bird"]
     send_fn("here you go")
-    assert sent == [("create-20260812-x", "request", "here you go")]
+    assert sent == [("FreeForge", "create-20260812-x", "here you go")]
     assert "create-20260812-x" in label
 
 
