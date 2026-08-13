@@ -59,21 +59,31 @@ def channel_message(sender_id, content, channel="FreeForge", topic="create-20260
     }
 
 
-def test_accept_takes_dms_and_live_request_topics():
-    from agforge.zulip_listener import accept
+def test_react_topic_acks_synchronously_before_the_run(monkeypatch):
+    """The common ack must be the sweep handler's first, synchronous act:
+    it is what makes the bot the last poster so the sweep stops matching."""
+    sent = []
+    spawned = []
 
-    assert accept(dm(HUMAN_ID, "hi"), BOT_ID)
-    assert accept(channel_message(HUMAN_ID, "make a bird"), BOT_ID)
-    # topic-based, channel-agnostic: a future project channel works unchanged
-    assert accept(channel_message(HUMAN_ID, "make a bird", channel="project-x"), BOT_ID)
-    assert not accept(channel_message(BOT_ID, "own echo"), BOT_ID)
-    assert not accept(channel_message(HUMAN_ID, "chatter", topic="requests"), BOT_ID)
-    assert not accept(
-        channel_message(
-            HUMAN_ID, "late reply", topic=f"{zulip.RESOLVED_TOPIC_PREFIX}create-20260812-x"
-        ),
-        BOT_ID,
+    class Client:
+        def whoami(self):
+            return {"user_id": BOT_ID}
+
+        def send_to_channel(self, channel, topic, text):
+            sent.append((channel, topic, text))
+
+        def topic_history(self, channel, topic, num_before):
+            return []
+
+    monkeypatch.setattr(
+        zulip_chat, "_spawn_run",
+        lambda history_fn, send_fn, label, self_id, log, ack: spawned.append((label, ack)),
     )
+    zulip_chat.react_topic(Client(), "FreeForge", "create-20260812-x")
+
+    assert sent == [("FreeForge", "create-20260812-x", zulip_chat.SWEEP_ACK)]
+    # The run itself skips its own "on it" ack — the common ack already spoke.
+    assert spawned == [("channel='FreeForge' topic='create-20260812-x'", False)]
 
 
 def test_conversation_answers_a_channel_message_in_its_topic():
@@ -113,6 +123,7 @@ def test_transcript_labels_speakers_and_drops_acks():
         [
             dm(HUMAN_ID, "make me a red bird"),
             dm(BOT_ID, zulip_chat.ACK_TEMPLATE.format(request_id="abc")),
+            dm(BOT_ID, zulip_chat.SWEEP_ACK),
             dm(BOT_ID, "here it is: http://example.invalid/bird.png"),
             dm(HUMAN_ID, "same bird but blue"),
         ],

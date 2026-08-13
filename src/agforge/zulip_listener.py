@@ -1,32 +1,24 @@
-"""agforge's chat entrance: long-poll Zulip and react to messages for the bot.
+"""agforge's chat entrance: pull `create-*` topics, long-poll DMs.
 
-The mechanics live in `agag.zulip`, shared with the other agents' listeners
-(client, self-loop guard, queue re-registration, restart survival). What is
-agforge's own is the credentials path, the handler, and the acceptance rule:
-DMs as before, plus channel messages whose *topic* is a `create-*` request
-(the zulip_channel_topic workflow). The rule is topic-based and
-channel-agnostic on purpose: every subscribed agent sees every event, and
-each one's own accept rule is what keeps irrelevant topics from starting a
-run — a future shared project channel can carry agforge's topics next to
-other agents' without anyone reacting to traffic that is not theirs.
-Resolving a topic renames it to `✔ create-…`, which stops matching the
-prefix, so a finished conversation goes quiet for free.
+The mechanics live in `agag.zulip`, shared with the other agents' listeners.
+Phase 3 split the two conversation kinds: request *topics* are served by the
+pull loop (`sweep_serve` with the `create-` prefix — every unresolved
+`create-*` topic in a subscribed channel whose last poster is not this bot,
+found again on every startup and queue re-registration, so a post that
+arrived while the listener was down is not lost), while DMs stay on the
+event payload (`serve`, in a side thread — a DM narrow cannot be swept, and
+a lost DM can simply be resent). Resolving a topic renames it to `✔ create-…`,
+which stops matching the prefix, so a finished conversation goes quiet for
+free.
 """
 
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
-from agag.zulip import (
-    ZulipClient,
-    channel_name,
-    dm_partners,
-    is_channel_message_for_us,
-    is_dm_for_us,
-    log,
-    serve,
-)
+from agag.zulip import ZulipClient, channel_name, dm_partners, is_dm_for_us, log, serve, sweep_serve
 
 AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 ZULIP_ENV = AGFORGE_ROOT / ".local" / "zulip.env"
@@ -35,20 +27,11 @@ ZULIP_ENV = AGFORGE_ROOT / ".local" / "zulip.env"
 # renamed "✔ create-…" and stops matching on its own.
 REQUEST_TOPIC_PREFIX = "create-"
 
-__all__ = ["ZULIP_ENV", "accept", "handle_message", "log", "main"]
-
-
-def accept(message: dict, self_id: int) -> bool:
-    """DMs, and channel messages in a live `create-*` request topic."""
-    if is_dm_for_us(message, self_id):
-        return True
-    return is_channel_message_for_us(message, self_id) and str(
-        message.get("subject", "")
-    ).startswith(REQUEST_TOPIC_PREFIX)
+__all__ = ["ZULIP_ENV", "handle_message", "log", "main", "observe_topic"]
 
 
 def handle_message(client: ZulipClient, message: dict, self_id: int) -> None:
-    """Passive handler (`AGFORGE_ZULIP_LOG_ONLY=1`): log the message, answer nothing."""
+    """Passive DM handler (`AGFORGE_ZULIP_LOG_ONLY=1`): log, answer nothing."""
     if message.get("type") == "stream":
         place = f"channel={channel_name(message)!r} topic={message.get('subject')!r}"
     else:
@@ -60,19 +43,34 @@ def handle_message(client: ZulipClient, message: dict, self_id: int) -> None:
     )
 
 
+def observe_topic(channel: str, topic: str) -> None:
+    """Passive sweep handler (`AGFORGE_ZULIP_LOG_ONLY=1`): log matches only."""
+    log(f"observed sweep match {channel!r}/{topic!r}")
+
+
 def main() -> None:
-    handler = handle_message
-    if os.environ.get("AGFORGE_ZULIP_LOG_ONLY") != "1":
-        try:
-            from .zulip_chat import react  # the agent route
-        except ImportError:
-            react = None
-        if react is not None:
-            handler = react
     client = ZulipClient.from_env(ZULIP_ENV)
-    log(f"agforge zulip listener starting (handler={handler.__name__})")
+    dm_client = ZulipClient.from_env(ZULIP_ENV)
+    if os.environ.get("AGFORGE_ZULIP_LOG_ONLY") == "1":
+        topic_handler = observe_topic
+        dm_handler = handle_message
+    else:
+        from .zulip_chat import react, react_topic  # the agent route
+
+        def topic_handler(channel: str, topic: str) -> None:
+            react_topic(client, channel, topic)
+
+        dm_handler = react
+    threading.Thread(
+        target=serve, args=(dm_client, dm_handler), kwargs={"accept": is_dm_for_us},
+        daemon=True,
+    ).start()
+    log(
+        "agforge zulip listener starting "
+        f"(pull sweep prefix {REQUEST_TOPIC_PREFIX!r} + DM thread)"
+    )
     try:
-        serve(client, handler, accept=accept)
+        sweep_serve(client, topic_handler, topic_filter=REQUEST_TOPIC_PREFIX)
     except KeyboardInterrupt:
         log("stopped")
 

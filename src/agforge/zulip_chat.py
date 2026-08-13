@@ -21,6 +21,11 @@ HISTORY_MESSAGES = 50
 ACK_PREFIX = "On it — working on this now."
 ACK_TEMPLATE = ACK_PREFIX + " (run `{request_id}`)"
 
+# The common sweep ack (phase 3, shared wording across agents). Posted
+# synchronously on a topic match: it is what makes this bot the last poster,
+# so the pull loop stops re-matching the topic while the run is in flight.
+SWEEP_ACK = "Message received. Please wait for the reply."
+
 DESIRE_TEMPLATE = """\
 This request arrived in a Zulip chat. You are talking with people in a chat
 window, so answer like a chat reply: short, plain, no preamble.
@@ -45,8 +50,10 @@ def format_transcript(messages: list[dict], self_id: int) -> str:
     lines = []
     for message in messages:
         content_raw = str(message.get("content", "")).strip()
-        if message.get("sender_id") == self_id and content_raw.startswith(ACK_PREFIX):
-            continue  # our own "on it" acks are noise, not conversation
+        if message.get("sender_id") == self_id and (
+            content_raw.startswith(ACK_PREFIX) or content_raw == SWEEP_ACK
+        ):
+            continue  # our own acks are noise, not conversation
         speaker = message.get("sender_full_name") or f"user{message.get('sender_id')}"
         if message.get("sender_id") == self_id:
             speaker = f"{speaker} (you)"
@@ -91,11 +98,12 @@ def conversation(client: ZulipClient, message: dict, self_id: int):
     )
 
 
-def run_and_reply(history_fn, send_fn, label: str, self_id: int, log) -> None:
+def run_and_reply(history_fn, send_fn, label: str, self_id: int, log, *, ack=True) -> None:
     request_id = uuid.uuid4().hex
     history = history_fn(HISTORY_MESSAGES)
     transcript = format_transcript(history, self_id)
-    send_fn(ACK_TEMPLATE.format(request_id=request_id))
+    if ack:
+        send_fn(ACK_TEMPLATE.format(request_id=request_id))
     log(f"chat run {request_id}: {len(history)} messages of context, {label}")
     job, meta = agent_run.run_request(compose_desire(transcript), request_id=request_id)
     meta.pop("output", "")
@@ -108,18 +116,10 @@ def run_and_reply(history_fn, send_fn, label: str, self_id: int, log) -> None:
     send_fn(reply_text(job))
 
 
-def react(client: ZulipClient, message: dict, self_id: int) -> None:
-    """Listener handler: answer this message, in place, in its own thread."""
-    from .zulip_listener import log
-
-    place = conversation(client, message, self_id)
-    if place is None:
-        return
-    history_fn, send_fn, label = place
-
+def _spawn_run(history_fn, send_fn, label: str, self_id: int, log, *, ack: bool) -> None:
     def worker() -> None:
         try:
-            run_and_reply(history_fn, send_fn, label, self_id, log)
+            run_and_reply(history_fn, send_fn, label, self_id, log, ack=ack)
         except Exception as error:
             log(f"chat run failed: {error!r}")
             try:
@@ -128,3 +128,36 @@ def react(client: ZulipClient, message: dict, self_id: int) -> None:
                 log(f"could not report the failure to the chat: {send_error!r}")
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+def react(client: ZulipClient, message: dict, self_id: int) -> None:
+    """DM listener handler: answer this message, in place, in its own thread."""
+    from .zulip_listener import log
+
+    place = conversation(client, message, self_id)
+    if place is None:
+        return
+    history_fn, send_fn, label = place
+    _spawn_run(history_fn, send_fn, label, self_id, log, ack=True)
+
+
+def react_topic(client: ZulipClient, channel: str, topic: str) -> None:
+    """Sweep handler: ack the topic synchronously, then answer it in a thread.
+
+    The synchronous ack makes this bot the topic's last poster before the
+    sweep moves on; the run's own "on it" ack is skipped since the common
+    ack already said so.
+    """
+    from .zulip_listener import log
+
+    self_id = int(client.whoami()["user_id"])
+    send_fn = lambda text: client.send_to_channel(channel, topic, text)  # noqa: E731
+    send_fn(SWEEP_ACK)
+    _spawn_run(
+        lambda n: client.topic_history(channel, topic, num_before=n),
+        send_fn,
+        f"channel={channel!r} topic={topic!r}",
+        self_id,
+        log,
+        ack=False,
+    )
