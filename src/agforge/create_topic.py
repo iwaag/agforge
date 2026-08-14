@@ -240,6 +240,22 @@ def handle_topic(client: ZulipClient, channel: str, topic: str) -> None:
             (front_dir / "chatlog.md").write_text(
                 format_chatlog(history, self_id), encoding="utf-8"
             )
+            if not any(m.get("sender_id") != self_id for m in history):
+                # An empty topic is not a request, and it is not harmless
+                # either: `sweep_topics` only skips a topic whose *last*
+                # poster is this bot, so a topic with no messages at all
+                # matches every sweep forever. Answering it in one line —
+                # without an agent run — is what silences it. This is
+                # reachable: resolving a topic renames it, and a sweep that
+                # reads the old name inside that window finds it empty.
+                log(f"nothing to answer in {channel!r}/{topic!r}: no messages")
+                topic_write(
+                    topic,
+                    "There is nothing in this topic to answer yet.",
+                    channel=channel,
+                    client=client,
+                )
+                return
 
             step = "front"
             answer = run_front(front_prompt(bot_name), front_dir)

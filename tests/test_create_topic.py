@@ -179,6 +179,31 @@ def test_a_generator_failure_names_its_own_step(monkeypatch, tmp_path):
     assert "failed during generator: no disk space" in calls[-1][2]
 
 
+def test_an_empty_topic_is_answered_in_one_line_and_costs_no_agent_run(monkeypatch, tmp_path):
+    """`sweep_topics` skips a topic whose *last* poster is this bot — a topic
+    with no messages at all has no last poster, so it matches every sweep
+    forever. One line silences it; a front run would only waste money."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls)
+
+    create_topic.handle_topic(Client(calls, history=[]), CHANNEL, TOPIC)
+
+    assert not any(call[0] in {"front", "generator"} for call in calls)
+    assert calls[-1][2] == "There is nothing in this topic to answer yet."
+    # The bot is now the last poster, so the next sweep skips this topic.
+    assert [call[0] for call in calls] == ["whoami", "write", "history", "write"]
+
+
+def test_a_topic_holding_only_our_own_posts_is_also_empty(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls)
+    only_ours = [message(sender_id=BOT_ID, name="Forge", content="an old answer")]
+
+    create_topic.handle_topic(Client(calls, history=only_ours), CHANNEL, TOPIC)
+
+    assert not any(call[0] == "front" for call in calls)
+
+
 # --- generations -----------------------------------------------------------
 
 
