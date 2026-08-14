@@ -1,8 +1,11 @@
-"""agforge's Plane policy: routing, and what is deliberately not written.
+"""agforge's Plane policy: routing, and the two markers written on purpose.
 
 The client itself (`agag.plane`) is tested in pyagag. What is pinned here is
-only agforge's own decisions — which project a channel routes to, and the two
-absences that keep an agforge Work out of agautolab's `next_work`.
+only agforge's own decisions — which project a channel routes to, and the
+`FORGEAUTO` label / `[AUTO]` marker pair that makes a Work agforge's own
+`runcreate-` flow's to execute while staying out of agautolab's `next_work`
+(which wants the `AUTO` label). This reverses p1's "no labels, no `[AUTO]`"
+guards, on purpose (modernize p2).
 """
 
 import urllib.parse
@@ -13,7 +16,10 @@ from agag import plane as shared
 from agforge import plane
 
 CONFIG = shared.PlaneConfig("http://plane.invalid", "key", "ws")
-FREEFORGE = {"id": "p-free", "name": "FreeForge", "identifier": "FF"}
+FREEFORGE = {
+    "id": "p-free", "name": "FreeForge", "identifier": "FF",
+    "description": plane.FALLBACK_DESCRIPTION,
+}
 DEMO = {"id": "p-demo", "name": "Demo Project", "identifier": "DP"}
 STATES = [
     {"id": "s-backlog", "name": "Backlog", "group": "backlog"},
@@ -27,6 +33,7 @@ class Plane:
     def __init__(self, projects=(FREEFORGE,)):
         self.projects = list(projects)
         self.issues = {}
+        self.labels = []
         self.calls = []
 
     def __call__(self, method, url, *, headers, body=None, timeout=30):
@@ -39,6 +46,12 @@ class Plane:
             return 201, created
         if method == "GET" and "/states/" in url:
             return 200, {"results": STATES}
+        if method == "GET" and "/labels/" in url:
+            return 200, {"results": self.labels}
+        if method == "POST" and url.endswith("/labels/"):
+            label = {"id": f"l-{len(self.labels) + 1}", **body}
+            self.labels.append(label)
+            return 201, label
         if method == "GET" and "external_id=" in url:
             key = urllib.parse.unquote(url.split("external_id=", 1)[1].split("&", 1)[0])
             found = self.issues.get(key)
@@ -58,6 +71,7 @@ class Plane:
 def wire(monkeypatch, fake):
     monkeypatch.setattr(shared, "_request_json", fake)
     monkeypatch.setattr(plane, "load_plane_config", lambda path=None: CONFIG)
+    monkeypatch.setattr(plane, "_LABEL_CACHE", {})
 
 
 def plan_file(tmp_path, text="# Draw the bird\n\nOne 64x64 PNG.\n"):
@@ -66,27 +80,64 @@ def plan_file(tmp_path, text="# Draw the bird\n\nOne 64x64 PNG.\n"):
     return path
 
 
-# --- what must never be written -------------------------------------------
+# --- the two markers written on purpose (p2 reverses the p1 guards) --------
 
 
-def test_a_registered_work_carries_no_labels(monkeypatch, tmp_path):
-    """`labels` is the one place autolab's AUTO label would attach, and an
-    AUTO-labelled issue is one `next_work` picks up and executes."""
+def test_a_registered_work_carries_the_forgeauto_label(monkeypatch, tmp_path):
+    """The label is what `runcreate-` work selection picks up — and, being
+    `FORGEAUTO` rather than `AUTO`, what autolab's `next_work` passes over."""
     fake = Plane()
     wire(monkeypatch, fake)
     plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
     body = fake.bodies("POST", "/issues/")[0]
-    assert "labels" not in body
+    assert body["labels"] == [fake.labels[0]["id"]]
+    assert fake.labels[0]["name"] == "FORGEAUTO"
     assert (body["external_source"], body["external_id"]) == ("agforge", "FreeForge/create-x")
 
 
-def test_a_created_project_carries_no_auto_marker(monkeypatch, tmp_path):
+def test_a_created_project_carries_the_auto_marker(monkeypatch, tmp_path):
     fake = Plane(projects=[])
     wire(monkeypatch, fake)
     plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
     created = fake.bodies("POST", "/projects/")[0]
     assert created["name"] == "FreeForge"
-    assert "[AUTO]" not in created["description"].upper()
+    assert created["description"].startswith("[AUTO]")
+
+
+def test_an_unmarked_freeforge_description_is_reconciled(monkeypatch, tmp_path):
+    """The live project predates the marker; `_fallback` patches it in place
+    instead of requiring a hand edit in the Plane UI."""
+    fake = Plane(projects=[{
+        "id": "p-free", "name": "FreeForge", "identifier": "FF",
+        "description": "agforge request records: FreeForge",
+    }])
+    wire(monkeypatch, fake)
+    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
+    patched = [b for m, url, b in fake.calls if m == "PATCH" and "/projects/" in url]
+    assert patched == [{"description": plane.FALLBACK_DESCRIPTION}]
+
+
+def test_a_marked_freeforge_description_is_left_alone(monkeypatch, tmp_path):
+    fake = Plane()
+    wire(monkeypatch, fake)
+    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
+    assert not [b for m, url, b in fake.calls if m == "PATCH" and "/projects/" in url]
+
+
+def test_ensure_label_creates_once_and_is_cached(monkeypatch):
+    fake = Plane()
+    wire(monkeypatch, fake)
+    label_id = plane.ensure_label(CONFIG, "p-free")
+    assert fake.labels == [{"id": label_id, "name": "FORGEAUTO"}]
+    assert plane.ensure_label(CONFIG, "p-free") == label_id
+    assert len(fake.labels) == 1
+
+
+def test_ensure_label_reuses_an_existing_label_case_insensitively(monkeypatch):
+    fake = Plane()
+    fake.labels.append({"id": "existing", "name": "forgeauto"})
+    wire(monkeypatch, fake)
+    assert plane.ensure_label(CONFIG, "p-free") == "existing"
 
 
 # --- routing ---------------------------------------------------------------
