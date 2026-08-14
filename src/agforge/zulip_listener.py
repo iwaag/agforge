@@ -1,17 +1,16 @@
-"""agforge's chat entrance: pull `create-*` topics, long-poll DMs.
+"""agforge's chat entrance: pull `create-*`/`runcreate-*` topics, long-poll DMs.
 
 The mechanics live in `agag.zulip`, shared with the other agents' listeners.
-The two conversation kinds are served differently. Request *topics* go
-through `create_topic.handle_topic` — the front/generator pair over a
-generation workspace — driven by the pull loop (`sweep_serve` with the
-`create-` prefix — every unresolved
-`create-*` topic in a subscribed channel whose last poster is not this bot,
-found again on every startup and queue re-registration, so a post that
-arrived while the listener was down is not lost), while DMs stay on the
-event payload (`serve`, in a side thread — a DM narrow cannot be swept, and
-a lost DM can simply be resent). Resolving a topic renames it to `✔ create-…`,
-which stops matching the prefix, so a finished conversation goes quiet for
-free.
+Swept *topics* are routed by `dispatch`: `create-` topics go through
+`create_topic.handle_topic` — the front/generator pair over a generation
+workspace — and `runcreate-` topics through `runcreate_topic.handle_runcreate`
+— one Work execution per trigger. The pull loop (`sweep_serve`) finds every
+unresolved matching topic in a subscribed channel whose last poster is not
+this bot, again on every startup and queue re-registration, so a post that
+arrived while the listener was down is not lost. DMs stay on the event
+payload (`serve`, in a side thread — a DM narrow cannot be swept, and a lost
+DM can simply be resent). Resolving a topic renames it to `✔ …`, which stops
+matching the prefixes, so a finished conversation goes quiet for free.
 """
 
 from __future__ import annotations
@@ -28,8 +27,28 @@ ZULIP_ENV = AGFORGE_ROOT / ".local" / "zulip.env"
 # Request topics per the zulip_channel_topic workflow. A resolved topic is
 # renamed "✔ create-…" and stops matching on its own.
 REQUEST_TOPIC_PREFIX = "create-"
+# Execution-trigger topics: any non-bot post fires one Work execution.
+RUNCREATE_TOPIC_PREFIX = "runcreate-"
+SWEEP_PREFIXES = (RUNCREATE_TOPIC_PREFIX, REQUEST_TOPIC_PREFIX)
 
-__all__ = ["ZULIP_ENV", "handle_message", "log", "main", "observe_topic"]
+__all__ = ["ZULIP_ENV", "dispatch", "handle_message", "log", "main", "observe_topic"]
+
+
+def dispatch(client: ZulipClient, channel: str, topic: str) -> None:
+    """Route one swept topic to its handler.
+
+    `runcreate-` cannot collide with the `create-` prefix match (different
+    first letter), but it is routed first anyway so the order is a decision,
+    not an accident. Both work in any subscribed channel: a `runcreate-`
+    topic carries no project — the project comes from the chosen Work.
+    """
+    from .create_topic import handle_topic
+    from .runcreate_topic import handle_runcreate
+
+    if topic.startswith(RUNCREATE_TOPIC_PREFIX):
+        handle_runcreate(client, channel, topic)
+        return
+    handle_topic(client, channel, topic)
 
 
 def handle_message(client: ZulipClient, message: dict, self_id: int) -> None:
@@ -57,11 +76,10 @@ def main() -> None:
         topic_handler = observe_topic
         dm_handler = handle_message
     else:
-        from .create_topic import handle_topic  # the topic route: front + generator
         from .zulip_chat import react  # the DM route: one charter run
 
         def topic_handler(channel: str, topic: str) -> None:
-            handle_topic(client, channel, topic)
+            dispatch(client, channel, topic)
 
         dm_handler = react
     threading.Thread(
@@ -70,10 +88,10 @@ def main() -> None:
     ).start()
     log(
         "agforge zulip listener starting "
-        f"(pull sweep prefix {REQUEST_TOPIC_PREFIX!r} + DM thread)"
+        f"(pull sweep, prefixes {SWEEP_PREFIXES} + DM thread)"
     )
     try:
-        sweep_serve(client, topic_handler, topic_filter=REQUEST_TOPIC_PREFIX)
+        sweep_serve(client, topic_handler, topic_filter=SWEEP_PREFIXES)
     except KeyboardInterrupt:
         log("stopped")
 
