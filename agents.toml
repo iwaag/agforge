@@ -17,6 +17,10 @@ model = "anthropic/claude-sonnet-5"
 harness = "fake"
 model = "ollama/qwen3.6:35b-a3b-coding-nvfp4"
 
+[roles.front]
+profile = "sonnet"
+requires = []
+
 [roles.generator]
-profile = "local"
+profile = "sonnet"
 requires = []

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from agag import agent_config
-from agforge import agent_run
+from agforge import agent_run, role_run
 
 
 EXAMPLES = Path(__file__).resolve().parents[3] / "devpolicy" / "contracts" / "agent" / "examples"
@@ -151,24 +151,28 @@ base_url = "http://ollama.example:11434/v1"
 def test_local_ace_studio_path_is_injected_without_sourcing_shell(tmp_path):
     env_file = tmp_path / "ace-studio.env"
     env_file.write_text('ACE_STUDIO_CLI="/Applications/ACE Studio.app/tool"\n')
-    assert agent_run._local_tool_environment(env_file, tmp_path / "absent") == {
-        "ACE_STUDIO_CLI": "/Applications/ACE Studio.app/tool"
-    }
+    assert role_run.tool_environment(
+        env_file, tmp_path / "absent", tmp_path / "absent"
+    ) == {"ACE_STUDIO_CLI": "/Applications/ACE Studio.app/tool"}
 
 
 def test_local_tool_environment_ignores_unrelated_keys(tmp_path):
     env_file = tmp_path / "ace-studio.env"
     env_file.write_text('SECRET="do-not-import"\n')
-    assert agent_run._local_tool_environment(env_file, tmp_path / "absent") == {}
+    assert role_run.tool_environment(
+        env_file, tmp_path / "absent", tmp_path / "absent"
+    ) == {}
 
 
-def test_local_tool_bin_is_prepended_to_path(tmp_path):
+def test_local_tool_bin_and_scripts_are_prepended_to_path(tmp_path):
     env_file = tmp_path / "ace-studio.env"
     env_file.write_text('ACE_STUDIO_CLI="/Applications/ACE Studio.app/tool"\n')
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    environment = agent_run._local_tool_environment(env_file, bin_dir)
-    assert environment["PATH"].split(os.pathsep, 1)[0] == str(bin_dir)
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    environment = role_run.tool_environment(env_file, bin_dir, scripts_dir)
+    assert environment["PATH"].split(os.pathsep)[:2] == [str(bin_dir), str(scripts_dir)]
 
 
 def test_unavailable_selected_harness_fails_without_fallback(tmp_path):

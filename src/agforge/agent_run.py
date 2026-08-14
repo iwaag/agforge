@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import sys
 import uuid
-from dataclasses import replace
 from pathlib import Path
 
-from agag.agent_config import AgentConfigError, ResolvedAgent, load_config, resolve_role
+from agag.agent_config import AgentConfigError, ResolvedAgent
 from agag.harness import (
     build_argv as shared_build_argv,
     extract_event_text,
@@ -18,30 +16,19 @@ from agag.harness import (
     write_run_record as shared_write_run_record,
 )
 
-AGFORGE_ROOT = Path(__file__).resolve().parents[2]
+from .role_run import (
+    AGENTS_CONFIG,
+    AGENTS_LOCAL_CONFIG,
+    AGFORGE_ROOT,
+    CLAUDE_ALLOWED_TOOLS,
+    resolve_agforge_role,
+    tool_environment,
+)
+
 CHARTER_TEMPLATE = AGFORGE_ROOT / "service" / "charter.md"
-AGENTS_CONFIG = AGFORGE_ROOT / "agents.toml"
-AGENTS_LOCAL_CONFIG = AGFORGE_ROOT / ".local" / "agents.local.toml"
-ACE_STUDIO_ENV = AGFORGE_ROOT / ".local" / "ace-studio.env"
 
 DEFAULT_BUDGET_SECONDS = 900
 OUTPUT_TAIL_CHARS = 800
-
-CLAUDE_ALLOWED_TOOLS = (
-    "Bash(scripts/generate.sh:*)", "Bash(./scripts/generate.sh:*)",
-    "Bash(sh scripts/generate.sh:*)", "Bash(uv:*)", "Bash(python3:*)",
-    "Bash(pip:*)", "Bash(curl:*)", "Bash(sips:*)", "Bash(magick:*)",
-    "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(file:*)", "Bash(ls:*)",
-    "Bash(pwd:*)", "Bash(cd:*)", "Bash(mkdir:*)", "Bash(cp:*)",
-    "Bash(mv:*)", "Bash(rm:*)", "Bash(cat:*)", "Bash(head:*)",
-    "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(rg:*)",
-    "Bash(find:*)", "Bash(sed:*)", "Bash(awk:*)", "Bash(echo:*)",
-    "Bash(printf:*)", "Bash(jq:*)", "Bash(date:*)", "Bash(env:*)",
-    "Bash(which:*)", "Bash(mc:*)", "Bash(git status:*)",
-    "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
-    "Bash(acestudio-cli:*)",
-    "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
-)
 
 
 class AgentRunError(Exception):
@@ -53,35 +40,18 @@ class AgentRunError(Exception):
         super().__init__(message)
 
 
-def _local_tool_environment(
-    path: Path = ACE_STUDIO_ENV, bin_dir: Path | None = None
-) -> dict[str, str]:
-    """Read the allowlisted host-local tool path without sourcing shell code."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return {}
-    environment: dict[str, str] = {}
-    for line in lines:
-        tokens = shlex.split(line, comments=True)
-        if len(tokens) == 1 and tokens[0].startswith("ACE_STUDIO_CLI="):
-            value = tokens[0].split("=", 1)[1]
-            if value:
-                environment["ACE_STUDIO_CLI"] = value
-            break
-    local_bin = bin_dir if bin_dir is not None else AGFORGE_ROOT / ".local" / "bin"
-    if local_bin.is_dir():
-        environment["PATH"] = f"{local_bin}{os.pathsep}{os.environ.get('PATH', '')}"
-    return environment
-
-
 def resolve_generator(*, check_available: bool = True) -> ResolvedAgent:
-    config, overlay = load_config(AGENTS_CONFIG, AGENTS_LOCAL_CONFIG)
-    agent = resolve_role(
-        config, overlay, "generator", check_available=check_available,
-        project_name="agforge",
+    """The `:8092` charter path's agent — the same role the topic path runs.
+
+    The config pair is passed explicitly so this module's own paths stay the
+    seam the request-service tests redirect at the `fake` harness.
+    """
+    return resolve_agforge_role(
+        "generator",
+        check_available=check_available,
+        config_path=AGENTS_CONFIG,
+        overlay_path=AGENTS_LOCAL_CONFIG,
     )
-    return replace(agent, environment={**agent.environment, **_local_tool_environment()})
 
 
 def transcripts_dir() -> Path:
