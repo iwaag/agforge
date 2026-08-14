@@ -14,6 +14,15 @@ import requests
 
 DEFAULT_TTL_MINUTES = 60
 
+# `upload_and_presign` serves more than images now (the runcreate flow ships
+# result zips through it); anything unknown is an octet-stream.
+CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".zip": "application/zip",
+}
+
 AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = AGFORGE_ROOT / ".local" / "out"
 DEFAULTS_FILE = AGFORGE_ROOT / "params" / "defaults.toml"
@@ -121,8 +130,10 @@ def upload_and_presign(env: dict[str, str], local_path: Path, ttl_minutes: int) 
         aws_secret_access_key=env["AGFORGE_S3_SECRET_KEY"],
         region_name="us-east-1",
     )
-    key = f"images/{date.today().isoformat()}/{uuid.uuid4().hex}{local_path.suffix}"
-    content_type = "image/jpeg" if local_path.suffix in (".jpg", ".jpeg") else "image/png"
+    suffix = local_path.suffix.lower()
+    content_type = CONTENT_TYPES.get(suffix, "application/octet-stream")
+    prefix = "images" if content_type.startswith("image/") else "files"
+    key = f"{prefix}/{date.today().isoformat()}/{uuid.uuid4().hex}{local_path.suffix}"
     s3.upload_file(str(local_path), bucket, key, ExtraArgs={"ContentType": content_type})
     return s3.generate_presigned_url(
         "get_object",

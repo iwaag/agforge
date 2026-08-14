@@ -25,8 +25,9 @@ from agag.plane import compose_document, description_html
 from agag.topics import guide as shared_guide, next_record_path
 from agag.zulip import ZulipClient, log, topic_write
 
+from . import generate
 from .role_run import AGFORGE_ROOT, run_role
-from .works import Work, next_work
+from .works import Work, next_work, report_work
 from .zulip_chat import SWEEP_ACK
 
 AGENTWS_ROOT = AGFORGE_ROOT / ".local" / "agentws"
@@ -47,10 +48,14 @@ __all__ = [
     "AGENTWS_ROOT",
     "NO_WORK_REPLY",
     "ListenerError",
+    "deliver_to_origin",
     "handle_runcreate",
     "prepare_workspace",
+    "result_files",
     "run_generator",
+    "upload_result",
     "workspace_dir",
+    "zip_result",
 ]
 
 
@@ -115,9 +120,34 @@ def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
 
         step = "generator run"
         answer = run_generator(workspace)
+        # "Success" is the run exiting zero — `run_generator` raised
+        # otherwise. An empty `result/` is a legitimate pure-text outcome,
+        # not a failure signal.
 
-        step = "delivering the result"
-        sections.extend(deliver_result(client, chosen, workspace, answer))
+        step = "packaging the result"
+        files = result_files(workspace)
+        if files:
+            delivery = (
+                f"result of \"{chosen.name}\" ({len(files)} file(s)), "
+                f"temporary download (expires in {generate.DEFAULT_TTL_MINUTES} min): "
+                f"{upload_result(zip_result(workspace))}"
+            )
+            sections.append(f"result/ holds {len(files)} file(s); zipped and uploaded")
+        else:
+            delivery = answer
+            sections.append("result/ is empty; delivering the answer text")
+
+        step = "origin delivery"
+        sections.append(deliver_to_origin(client, chosen, delivery))
+
+        step = "reporting to plane"
+        label, commented, completed = report_work(
+            chosen.project_id, chosen.issue_id, answer, True
+        )
+        sections.append(
+            f"work {label}: commented {'yes' if commented else 'no'}, "
+            f"Done {'yes' if completed else 'no'}"
+        )
     except Exception as error:  # noqa: BLE001 - the topic is the error channel
         log(f"runcreate topic workflow failed during {step}: {error!r}")
         sections.append(f"failed during {step}: {error}")
@@ -126,9 +156,53 @@ def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
                 channel=channel, client=client)
 
 
-def deliver_result(
-    client: ZulipClient, work: Work, workspace: Path, answer: str
-) -> list[str]:
-    """Deliver the run's outcome (Step 4). For now: the answer stays in the
-    summary; origin delivery and the Plane write-back arrive next step."""
-    return [answer]
+def result_files(workspace: Path) -> list[Path]:
+    """Every file under `result/`, in stable order."""
+    return sorted(path for path in (workspace / "result").rglob("*") if path.is_file())
+
+
+def zip_result(workspace: Path) -> Path:
+    """`result/` as `result.zip` in the workspace root — outside the archived
+    directory, so it can never contain itself. Overwritten on re-trigger."""
+    return Path(shutil.make_archive(
+        str(workspace / "result"), "zip", root_dir=workspace / "result"
+    ))
+
+
+def upload_result(archive: Path) -> str:
+    """One presigned download URL for the archive.
+
+    `generate.load_env`/`upload_and_presign` answer a missing configuration
+    with `sys.exit`, which is right for the CLI they serve and wrong here —
+    a SystemExit would sail past the handler's error discipline.
+    """
+    try:
+        return generate.upload_and_presign(
+            generate.load_env(), archive, generate.DEFAULT_TTL_MINUTES
+        )
+    except SystemExit as error:
+        raise ListenerError(f"upload failed: {error}") from error
+
+
+def deliver_to_origin(client: ZulipClient, work: Work, delivery: str) -> str:
+    """Post the delivery to the topic the request came from, and say what
+    happened either way — the runcreate summary must survive everything,
+    including a dead origin channel.
+
+    The origin `create-` topic may already be resolved (`✔`); posting under
+    the plain name still lands (Zulip treats it as that topic's thread), and
+    this bot being last poster there cannot re-trigger the create sweep.
+    """
+    origin = work.origin()
+    if origin is None:
+        return f"no origin topic recorded; the result stays here:\n\n{delivery}"
+    channel, topic = origin
+    try:
+        topic_write(topic, delivery, channel=channel, client=client)
+    except Exception as error:  # noqa: BLE001 - reported, never fatal
+        log(f"origin delivery to {channel!r}/{topic!r} failed: {error!r}")
+        return (
+            f"could not deliver to {channel}/{topic} ({error}); "
+            f"the result stays here:\n\n{delivery}"
+        )
+    return f"delivered to {channel}/{topic}"
