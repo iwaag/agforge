@@ -30,6 +30,7 @@ from agag.zulip import (
     topic_write,
 )
 
+from .plane import register_plan as plane_register_plan
 from .role_run import AGFORGE_ROOT, run_role
 from .zulip_chat import ACK_PREFIX, SWEEP_ACK
 
@@ -170,12 +171,13 @@ def run_generator(cwd: Path) -> str:
 
 
 def register_plan(channel: str, topic: str, plan: Path) -> str:
-    """Register the generator's `plan.md` as a Plane Work. One report line.
+    """Register the generator's `plan.md` as this topic's Plane Work.
 
-    Filled in by Step 3; until then the plan is kept and said out loud, so a
-    topic that produced one is never silently dropped.
+    Wrapped rather than imported at the call site so the whole Plane client
+    stays behind one name — step 5 moves it into `agag` and only this line
+    changes.
     """
-    return f"a plan was written ({plan}); Plane registration lands in step 3"
+    return plane_register_plan(channel, topic, plan)
 
 
 def handle_generator(channel: str, topic: str, front_dir: Path, number: int) -> list[str]:
