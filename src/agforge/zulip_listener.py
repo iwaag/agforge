@@ -1,8 +1,10 @@
 """agforge's chat entrance: pull `create-*` topics, long-poll DMs.
 
 The mechanics live in `agag.zulip`, shared with the other agents' listeners.
-Phase 3 split the two conversation kinds: request *topics* are served by the
-pull loop (`sweep_serve` with the `create-` prefix — every unresolved
+The two conversation kinds are served differently. Request *topics* go
+through `create_topic.handle_topic` — the front/generator pair over a
+generation workspace — driven by the pull loop (`sweep_serve` with the
+`create-` prefix — every unresolved
 `create-*` topic in a subscribed channel whose last poster is not this bot,
 found again on every startup and queue re-registration, so a post that
 arrived while the listener was down is not lost), while DMs stay on the
@@ -55,10 +57,11 @@ def main() -> None:
         topic_handler = observe_topic
         dm_handler = handle_message
     else:
-        from .zulip_chat import react, react_topic  # the agent route
+        from .create_topic import handle_topic  # the topic route: front + generator
+        from .zulip_chat import react  # the DM route: one charter run
 
         def topic_handler(channel: str, topic: str) -> None:
-            react_topic(client, channel, topic)
+            handle_topic(client, channel, topic)
 
         dm_handler = react
     threading.Thread(
