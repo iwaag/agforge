@@ -37,9 +37,9 @@ workspace root).
 - `agents.toml` — committed `ag.agent-config.v1` models, profiles, and the
   `generator` role. `.local/agents.local.toml` supplies executable paths,
   provider endpoints, and an optional local profile selection.
-- `opencode.json` — OpenCode tool grants (wide allowlist, deny by default).
-  Claude Code equivalent: `CLAUDE_ALLOWED_TOOLS` in
-  `src/agforge/agent_run.py`.
+- Tool grants: `CLAUDE_ALLOWED_TOOLS` in `src/agforge/agent_run.py` for
+  Claude Code. agcode needs no grant file — it offers its four built-in tools
+  and has no permission engine, so `run` is the whole shell surface.
 - `src/agforge/` — the installed application package. Files under `service/`
   and `scripts/` are compatibility launchers or runtime documents.
 - `params/defaults.toml` — sample generation defaults.
@@ -117,8 +117,8 @@ Actual values for this environment: `.local/.env`, `.local/devenv.md`.
 
 Two, both guarding irreversible harm rather than mistakes: `generate.py`
 refuses to write to the `nctl-outbox` bucket (another project's), and no
-agent here runs with `--dangerously-skip-permissions` / `opencode run
---auto`, because these run natively on the agstudio Mac. Never commit
+agent here runs with `--dangerously-skip-permissions`, because these run
+natively on the agstudio Mac. agcode has no such flag to set. Never commit
 endpoints, hostnames, credentials, or generated images.
 
 ## Related docs

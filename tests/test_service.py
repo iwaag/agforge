@@ -209,7 +209,7 @@ def test_prose_alone_is_not_an_answer(agent):
     assert job["status"] == "ended"
 
 
-# --- opencode event-stream extraction --------------------------------------
+# --- event-stream extraction (the `fake` harness passthrough) --------------------------------------
 
 def test_event_stream_yields_text_and_stats():
     raw = "\n".join([

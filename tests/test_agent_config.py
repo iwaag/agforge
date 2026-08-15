@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ BASE = '''schema = "ag.agent-config.v1"
 [models."ollama/local-model"]
 [models."anthropic/claude-sonnet-5"]
 [profiles.local]
-harness = "opencode"
+harness = "agcode"
 model = "ollama/local-model"
 [profiles.sonnet]
 harness = "claude_code"
@@ -44,7 +45,7 @@ def test_valid_shared_contract_examples(project):
     for role in config.get("roles", {}):
         resolved = agent_config.resolve_role(config, overlay, role, check_available=False)
         assert resolved.role == role
-        assert resolved.harness in {"opencode", "claude_code", "fake"}
+        assert resolved.harness in {"agcode", "claude_code", "fake"}
 
 
 @pytest.mark.parametrize("fixture", sorted((EXAMPLES / "invalid").glob("*.toml")),
@@ -65,10 +66,10 @@ def test_invalid_shared_contract_examples_report_expected_code(fixture):
     ("body", "code"),
     [
         (BASE.replace('schema = "ag.agent-config.v1"\n', ""), "E_SCHEMA"),
-        (BASE.replace('harness = "opencode"', 'harness = "ollama"'), "E_UNKNOWN_HARNESS"),
+        (BASE.replace('harness = "agcode"', 'harness = "ollama"'), "E_UNKNOWN_HARNESS"),
         (BASE.replace("ollama/local-model", "local-model"), "E_BAD_MODEL_ID"),
         (BASE.replace('model = "ollama/local-model"', 'model = "ollama/absent"'), "E_UNKNOWN_MODEL"),
-        (BASE.replace('harness = "opencode"', 'harness = "claude_code"', 1), "E_INCOMPATIBLE"),
+        (BASE.replace('harness = "agcode"', 'harness = "claude_code"', 1), "E_INCOMPATIBLE"),
         (BASE.replace('profile = "local"', 'profile = "absent"'), "E_UNKNOWN_PROFILE"),
         (BASE.replace("requires = []", 'requires = ["ui_actions"]'), "E_CAPABILITY_UNMET"),
     ],
@@ -87,7 +88,7 @@ def test_invalid_contract_classes(tmp_path, body, code):
         (
             '''schema = "ag.agent-config.v1"
 [profiles.sneaky]
-harness = "opencode"
+harness = "agcode"
 model = "ollama/local-model"
 ''',
             "E_OVERLAY_SCOPE",
@@ -131,21 +132,23 @@ profile = "sonnet"
     assert agent_run.build_argv(resolved)[4:6] == ["--model", "claude-sonnet-5"]
 
 
-def test_opencode_keeps_canonical_model_and_provider_endpoint(tmp_path):
-    command = tmp_path / "opencode"
-    command.write_text("#!/bin/sh\n")
-    command.chmod(0o755)
-    overlay_body = f'''schema = "ag.agent-config.v1"
-[local.harness.opencode]
-command = "{command}"
+def test_agcode_takes_the_native_model_and_keeps_the_canonical_one(tmp_path):
+    """agcode needs no [local.harness.agcode] block: sys.executable is the
+    default command, and it is already the interpreter importing agag."""
+    overlay_body = '''schema = "ag.agent-config.v1"
 [local.provider.ollama]
-base_url = "http://ollama.example:11434/v1"
+base_url = "http://ollama.example:11434"
 '''
     main, local = files(tmp_path, overlay=overlay_body)
     config, overlay = agent_config.load_config(main, local)
     resolved = agent_config.resolve_role(config, overlay, "generator")
-    assert agent_run.build_argv(resolved)[-2:] == ["-m", "ollama/local-model"]
-    assert resolved.provider_base_url == "http://ollama.example:11434/v1"
+    assert resolved.command == sys.executable
+    assert resolved.model == "ollama/local-model"     # canonical, for the record
+    assert agent_run.build_argv(resolved) == [
+        sys.executable, "-m", "agag.agcode",
+        "--model", "local-model",                     # native, for the wire
+        "--base-url", "http://ollama.example:11434",
+    ]
 
 
 def test_local_ace_studio_path_is_injected_without_sourcing_shell(tmp_path):
@@ -177,8 +180,8 @@ def test_local_tool_bin_and_scripts_are_prepended_to_path(tmp_path):
 
 def test_unavailable_selected_harness_fails_without_fallback(tmp_path):
     overlay_body = '''schema = "ag.agent-config.v1"
-[local.harness.opencode]
-command = "/definitely/absent/opencode"
+[local.harness.agcode]
+command = "/definitely/absent/python"
 '''
     main, local = files(tmp_path, overlay=overlay_body)
     config, overlay = agent_config.load_config(main, local)
@@ -187,16 +190,13 @@ command = "/definitely/absent/opencode"
     assert caught.value.code == "E_UNAVAILABLE"
 
 
-def test_missing_required_opencode_provider_endpoint_is_unavailable(tmp_path):
-    command = tmp_path / "opencode"
-    command.write_text("#!/bin/sh\n")
-    command.chmod(0o755)
-    overlay_body = f'''schema = "ag.agent-config.v1"
-[local.harness.opencode]
-command = "{command}"
-'''
-    main, local = files(tmp_path, overlay=overlay_body)
+def test_agcode_needs_no_declared_provider_endpoint(tmp_path):
+    """OpenCode could not be pointed at ollama without an explicit base_url,
+    so resolution refused one. agcode has its own local default, and the
+    endpoint is only supplied when it is not that default — so an overlay
+    without a provider block resolves rather than failing."""
+    main, local = files(tmp_path, overlay='schema = "ag.agent-config.v1"\n')
     config, overlay = agent_config.load_config(main, local)
-    with pytest.raises(agent_config.AgentConfigError) as caught:
-        agent_config.resolve_role(config, overlay, "generator")
-    assert caught.value.code == "E_UNAVAILABLE"
+    resolved = agent_config.resolve_role(config, overlay, "generator")
+    assert (resolved.harness, resolved.provider_base_url) == ("agcode", None)
+    assert "--base-url" not in agent_run.build_argv(resolved)
