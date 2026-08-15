@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = ["pillow", "boto3", "requests", "pyagag"]
 
 [project.scripts]
+agforge = "agforge.cli:main"
 agforge-request-service = "agforge.request_service:main"
 agforge-agent-run = "agforge.agent_run:main"
 agforge-transform = "agforge.transform:main"

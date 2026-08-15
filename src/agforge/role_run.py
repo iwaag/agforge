@@ -24,9 +24,11 @@ LOCAL_BIN = AGFORGE_ROOT / ".local" / "bin"
 SCRIPTS_DIR = AGFORGE_ROOT / "scripts"
 
 # The generator's grant: image/audio tooling, the shell verbs around it, and
-# file access inside its workspace. `generate.sh` is reached through PATH, so
-# the bare name is what the guide names and what is allowed here.
+# file access inside its workspace. `agforge` and `generate.sh` are reached
+# through PATH, so the bare name is what the toolsets name and what is
+# allowed here.
 CLAUDE_ALLOWED_TOOLS = (
+    "Bash(agforge:*)",
     "Bash(generate.sh:*)", "Bash(scripts/generate.sh:*)",
     "Bash(./scripts/generate.sh:*)",
     "Bash(sh scripts/generate.sh:*)", "Bash(uv:*)", "Bash(python3:*)",
@@ -47,7 +49,10 @@ CLAUDE_ALLOWED_TOOLS = (
 # `build_argv`, and claude_code then sits waiting for an interactive
 # permission answer until the timeout. Every new role belongs here.
 ROLE_ALLOWED_TOOLS = {
-    "front": "Read,Write,Edit,Glob,Grep",
+    # The front reads and writes text — and runs `agforge toolsets --list`,
+    # which its guide tells it to do. Without that grant it would sit on a
+    # permission prompt until the timeout.
+    "front": "Read,Write,Edit,Glob,Grep,Bash(agforge:*)",
     "generator": " ".join(CLAUDE_ALLOWED_TOOLS),
 }
 
@@ -62,7 +67,7 @@ def tool_environment(
     `run_harness` launches with `{**os.environ, **agent.environment}`, so this
     is where agforge's own tools become reachable by their bare names. Both
     `.local/bin` (host-installed CLIs) and `scripts/` (agforge's own
-    `generate.sh`) are prepended, which is what lets a guide say `generate.sh`
+    `agforge`) are prepended, which is what lets a toolset say `agforge`
     and a run in a topic workspace resolve it.
     """
     try:

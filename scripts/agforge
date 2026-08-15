@@ -1,0 +1,6 @@
+#!/bin/sh
+# The one CLI agforge's subagents reach by its bare name (scripts/ is on
+# their PATH). Usage: agforge --help
+set -eu
+cd "$(dirname "$0")/.."
+exec uv run agforge "$@"

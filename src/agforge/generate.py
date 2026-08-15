@@ -142,8 +142,12 @@ def upload_and_presign(env: dict[str, str], local_path: Path, ttl_minutes: int) 
     )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """The image-generation flags, on whichever parser wants them.
+
+    `agforge image generate` and this module's own `main` are the same
+    command with the same contract; the flag set is defined once.
+    """
     parser.add_argument("prompt", help="text prompt for the image")
     parser.add_argument(
         "--ttl", type=int, default=DEFAULT_TTL_MINUTES, metavar="MINUTES",
@@ -155,9 +159,12 @@ def main() -> None:
     parser.add_argument("--steps", help="overrides defaults.toml / .local/.env")
     parser.add_argument("--cfgscale", help="overrides defaults.toml / .local/.env")
     parser.add_argument("--seed", help="overrides defaults.toml / .local/.env")
-    args = parser.parse_args()
+
+
+def run(args: argparse.Namespace) -> None:
+    """Generate, upload, and print the URL. Exits on a missing configuration."""
     if not args.prompt.strip():
-        parser.error("prompt is empty")
+        sys.exit("prompt is empty")
 
     env = load_env()
     swarmui_url = env.get("AGFORGE_SWARMUI_URL")
@@ -167,6 +174,12 @@ def main() -> None:
     local_path = generate_image(swarmui_url, args.prompt, params)
     print(f"local: {local_path}", file=sys.stderr)
     print(upload_and_presign(env, local_path, args.ttl))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
+    run(parser.parse_args())
 
 
 if __name__ == "__main__":
