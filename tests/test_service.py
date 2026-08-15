@@ -209,39 +209,17 @@ def test_prose_alone_is_not_an_answer(agent):
     assert job["status"] == "ended"
 
 
-# --- event-stream extraction (the `fake` harness passthrough) --------------------------------------
+# --- the `fake` harness passthrough ------------------------------------------
 
-def test_event_stream_yields_text_and_stats():
-    raw = "\n".join([
-        '{"type":"step_start","part":{}}',
-        '{"type":"text","part":{"text":"Generating now."}}',
-        '{"type":"tool","part":{"tool":"bash"}}',
-        '{"type":"step_finish","part":{"cost":0.01}}',
-        '{"type":"text","part":{"text":"Uploaded and answered."}}',
-        '{"type":"step_finish","part":{"cost":0.02}}',
-    ])
-    text, stats = agent_run.extract_event_text(raw)
-    assert text == "Generating now.\nUploaded and answered."
-    assert stats == {
-        "num_turns": 2,
-        "cost_usd": 0.03,
-        "usage": {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0, "cache_write": 0},
-    }
-
-
-def test_plain_text_passes_through_unchanged():
-    raw = "just prose\nand a second line of it"
-    text, stats = agent_run.extract_event_text(raw)
-    assert text == raw
-    assert stats == {}
-
-
-def test_event_stream_outcome_parses_end_to_end(agent):
+def test_stub_output_reaches_the_caller_unparsed(agent):
+    """`fake` has no event stream to parse: whatever the stub prints is the
+    answer, and it reports no turn or cost statistics of its own."""
     agent.writes_result_wherever_told({"status": "done", "url": "http://x.example/a.png"})
-    agent.output('{"type":"text","part":{"text":"done, see the file"}}')
+    agent.output("done, see the file")
     job, meta = agent_run.run_request("d")
     assert job == {"status": "done", "url": "http://x.example/a.png"}
-    assert meta["num_turns"] == 0
+    assert "cost_usd" not in meta
+    assert "num_turns" not in meta
 
 
 def test_resolved_secret_environment_reaches_subprocess(agent, monkeypatch, tmp_path):

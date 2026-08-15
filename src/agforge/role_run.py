@@ -113,7 +113,6 @@ def resolve_agforge_role(
         config, overlay, role,
         profile_override=profile_override,
         check_available=check_available,
-        project_name="agforge",
     )
     return replace(agent, environment={**agent.environment, **tool_environment()})
 

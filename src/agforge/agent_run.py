@@ -11,7 +11,6 @@ from pathlib import Path
 from agag.agent_config import AgentConfigError, ResolvedAgent
 from agag.harness import (
     build_argv as shared_build_argv,
-    extract_event_text,
     run_harness,
     write_run_record as shared_write_run_record,
 )
