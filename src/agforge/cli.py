@@ -19,7 +19,7 @@ import argparse
 import re
 from pathlib import Path
 
-from . import generate
+from . import comfy_video, generate
 
 AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 TOOLSETS_DIR = AGFORGE_ROOT / "agent" / "toolsets"
@@ -93,6 +93,17 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_arguments(image_generate)
     image_generate.set_defaults(run=_run_image_generate, parser=image_generate)
 
+    video = commands.add_parser("video", help="video generation")
+    video_actions = video.add_subparsers(dest="action", required=True)
+    video_generate = video_actions.add_parser(
+        "generate", help="one 5-second video from a prompt",
+        description="Generate one 5-second video via ComfyUI and print its "
+                    "time-limited download URL as the last line. The prompt "
+                    "is the only parameter.",
+    )
+    comfy_video.add_arguments(video_generate)
+    video_generate.set_defaults(run=_run_video_generate, parser=video_generate)
+
     return parser
 
 
@@ -107,6 +118,10 @@ def _run_toolsets(args: argparse.Namespace) -> None:
 
 def _run_image_generate(args: argparse.Namespace) -> None:
     generate.run(args)
+
+
+def _run_video_generate(args: argparse.Namespace) -> None:
+    comfy_video.run(args)
 
 
 def main(argv: list[str] | None = None) -> None:

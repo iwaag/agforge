@@ -20,6 +20,8 @@ CONTENT_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
     ".zip": "application/zip",
 }
 
