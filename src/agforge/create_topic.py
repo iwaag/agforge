@@ -5,8 +5,9 @@ re-serve when a human spoke during the run — is `agag.topics.serve_topic`,
 shared with agautolab. What is agforge's own is the two-agent shape:
 
     <N>/front/       chatlog.md          → front run  → its answer, posted
+                     toolsets.csv                        (what it asked for)
     <N>/generator/   required_items.md   → generator run
-                     tools.md              plan.md → a Plane Work
+                     tools/toolset-*.md    plan.md → a Plane Work
                                            idea.md → posted verbatim
                                                    → its answer, posted
 
@@ -36,6 +37,7 @@ from agag.topics import (
 )
 from agag.zulip import ZulipClient, log
 
+from . import toolsets
 from .plane import register_plan as plane_register_plan
 from .role_run import AGFORGE_ROOT, run_role
 from .zulip_chat import ACK_PREFIX, SWEEP_ACK
@@ -50,6 +52,8 @@ FRONT_TIMEOUT_SECONDS = 360
 GENERATOR_TIMEOUT_SECONDS = 900
 
 REQUIRED_ITEMS = "required_items.md"
+TOOLSETS_CSV = "toolsets.csv"
+TOOLS_DIR = "tools"
 PLAN_FILE = "plan.md"
 IDEA_FILE = "idea.md"
 
@@ -62,6 +66,7 @@ __all__ = [
     "guide",
     "handle_generator",
     "handle_topic",
+    "place_toolsets",
     "register_plan",
     "run_front",
     "run_generator",
@@ -119,6 +124,20 @@ def register_plan(channel: str, topic: str, plan: Path) -> str:
     return plane_register_plan(channel, topic, plan)
 
 
+def place_toolsets(front_dir: Path, generator_dir: Path) -> list[str]:
+    """Build the generator's `tools/` from the front's `toolsets.csv`.
+
+    No csv, or nothing in it that resolves, leaves `tools/` empty — which is
+    a route the guide already covers: the generator asks back, writes
+    `idea.md`, or declines. Nothing here decides on the front's behalf.
+    """
+    csv = front_dir / TOOLSETS_CSV
+    requested = (
+        toolsets.parse_names(csv.read_text(encoding="utf-8")) if csv.is_file() else []
+    )
+    return toolsets.place(requested, generator_dir / TOOLS_DIR)
+
+
 def handle_generator(channel: str, topic: str, front_dir: Path, number: int) -> list[str]:
     """The `required_items.md` branch: build the generator workspace, run it.
 
@@ -130,7 +149,7 @@ def handle_generator(channel: str, topic: str, front_dir: Path, number: int) -> 
         return []
     generator_dir = generation_dir(channel, topic, number, "generator")
     shutil.copyfile(required, generator_dir / REQUIRED_ITEMS)
-    shutil.copyfile(GUIDES / "create_generator" / "tools.md", generator_dir / "tools.md")
+    place_toolsets(front_dir, generator_dir)
 
     answer = run_generator(generator_dir)
 

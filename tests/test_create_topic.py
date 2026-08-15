@@ -14,7 +14,7 @@ import pytest
 from agag import topics
 from agag.topics import GuideError
 
-from agforge import create_topic
+from agforge import create_topic, toolsets
 
 BOT_ID = 13
 HUMAN_ID = 8
@@ -51,7 +51,7 @@ class Client:
 
 
 def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
-         writes_required=False, writes=()):
+         writes_required=False, writes=(), toolsets_csv=None):
     monkeypatch.setattr(create_topic, "TOPICS_ROOT", tmp_path / "topics")
     monkeypatch.setattr(create_topic, "RECORDS_ROOT", tmp_path / "records")
     # Posting goes through the shared skeleton, so that is where it is caught.
@@ -65,6 +65,8 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
         calls.append(("front", prompt, cwd))
         if writes_required:
             (cwd / create_topic.REQUIRED_ITEMS).write_text("one bird, blue")
+        if toolsets_csv is not None:
+            (cwd / create_topic.TOOLSETS_CSV).write_text(toolsets_csv)
         return front
 
     def generator_run(cwd):
@@ -78,9 +80,14 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
     guides = tmp_path / "guides"
     (guides / "create_front").mkdir(parents=True)
     (guides / "create_front" / "guide.md").write_text("FRONT GUIDE")
-    (guides / "create_generator").mkdir(parents=True)
-    (guides / "create_generator" / "tools.md").write_text("## Tools\n- generate.sh\n")
     monkeypatch.setattr(create_topic, "GUIDES", guides)
+    # The toolset library the csv resolves against is the test's own, so
+    # nothing here depends on which toolsets the repository happens to ship.
+    library = tmp_path / "toolsets"
+    library.mkdir()
+    (library / "toolset-image.md").write_text("# Description\nImages\n\n# Image Tools\n")
+    (library / "toolset-video.md").write_text("# Description\nVideo\n\n# Video Tools\n")
+    monkeypatch.setattr(toolsets, "TOOLSETS_DIR", library)
 
 
 def gen_dir(tmp_path, number, role):
@@ -128,6 +135,7 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
     wire(
         monkeypatch, tmp_path, calls,
         writes_required=True,
+        toolsets_csv="toolset-image, Images\n",
         writes=(("idea.md", "buy a GPU"), ("plan.md", "# Bird\n\nDraw it.")),
     )
     monkeypatch.setattr(
@@ -144,7 +152,7 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
         "history",
     ]
     assert (generator / "required_items.md").read_text() == "one bird, blue"
-    assert "generate.sh" in (generator / "tools.md").read_text()
+    assert [path.name for path in (generator / "tools").iterdir()] == ["toolset-image.md"]
     assert calls[5][1] == generator
     # plan.md is registered, idea.md is relayed verbatim, then the answer.
     assert calls[-2][2] == "registered PA-1\n\nbuy a GPU\n\nmade it"
@@ -167,6 +175,38 @@ def test_a_plan_alone_still_reports_and_answers(monkeypatch, tmp_path):
     monkeypatch.setattr(create_topic, "register_plan", lambda *a: "registered PA-1")
     create_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
     assert calls[-2][2] == "registered PA-1\n\nmade it"
+
+
+# --- (b2) toolsets.csv → tools/ --------------------------------------------
+
+
+def test_the_csv_names_resolve_leniently_and_unknown_ones_are_skipped(
+    monkeypatch, tmp_path
+):
+    """The front copies these lines out of `agforge toolsets --list` by hand,
+    so extensions, description tails, blanks and case are all expected."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls, writes_required=True, toolsets_csv=(
+        "toolset-image, Images\n"
+        "TOOLSET-VIDEO.md\n"
+        "\n"
+        "toolset-nope\n"
+    ))
+    create_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
+    assert sorted(
+        path.name for path in (gen_dir(tmp_path, 1, "generator") / "tools").iterdir()
+    ) == ["toolset-image.md", "toolset-video.md"]
+
+
+def test_no_csv_leaves_an_empty_tools_directory(monkeypatch, tmp_path):
+    """Not an error: the generator guide routes this case itself — it asks
+    back, writes idea.md, or declines."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls, writes_required=True)
+    create_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
+    tools = gen_dir(tmp_path, 1, "generator") / "tools"
+    assert tools.is_dir() and list(tools.iterdir()) == []
+    assert any(call[0] == "generator" for call in calls)
 
 
 # --- (c) an exception mid-way: `failed during …` is posted -----------------

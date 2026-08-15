@@ -16,57 +16,10 @@ text repeats it.
 from __future__ import annotations
 
 import argparse
-import re
-from pathlib import Path
 
-from . import comfy_video, generate
+from . import comfy_video, generate, toolsets as toolsets_module
 
-AGFORGE_ROOT = Path(__file__).resolve().parents[2]
-TOOLSETS_DIR = AGFORGE_ROOT / "agent" / "toolsets"
-TOOLSET_GLOB = "toolset-*.md"
-
-DESCRIPTION_HEADING = re.compile(r"^#\s+Description\s*$", re.IGNORECASE)
-ANY_HEADING = re.compile(r"^#{1,6}\s")
-
-__all__ = ["build_parser", "describe_toolset", "list_toolsets", "main"]
-
-
-def describe_toolset(text: str) -> str:
-    """The body of a toolset's leading `# Description` section, on one line.
-
-    Toolset files always open with that heading; a file that does not is
-    still listed, with an empty description, rather than skipped — the front
-    should see every toolset that exists.
-    """
-    body: list[str] = []
-    collecting = False
-    for line in text.splitlines():
-        if DESCRIPTION_HEADING.match(line):
-            collecting = True
-            continue
-        if collecting and ANY_HEADING.match(line):
-            break
-        if collecting:
-            body.append(line)
-    return " ".join(" ".join(body).split())
-
-
-def list_toolsets(directory: Path | None = None) -> list[str]:
-    """One `name, description` line per toolset file, in name order.
-
-    This output is what the front copies into `toolsets.csv`, so it is a
-    stable contract: the first comma-separated field is the toolset name
-    without its extension.
-    """
-    root = TOOLSETS_DIR if directory is None else directory
-    lines = []
-    for path in sorted(root.glob(TOOLSET_GLOB)):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            text = ""
-        lines.append(f"{path.stem}, {describe_toolset(text)}".rstrip(", "))
-    return lines
+__all__ = ["build_parser", "main"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,7 +65,7 @@ def _run_toolsets(args: argparse.Namespace) -> None:
     # the flag is a usage error, not an empty answer.
     if not args.list:
         args.parser.error("nothing to do: pass --list")
-    for line in list_toolsets():
+    for line in toolsets_module.listing():
         print(line)
 
 
