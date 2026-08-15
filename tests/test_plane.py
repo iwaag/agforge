@@ -95,6 +95,40 @@ def test_a_registered_work_carries_the_forgeauto_label(monkeypatch, tmp_path):
     assert (body["external_source"], body["external_id"]) == ("agforge", "FreeForge/create-x")
 
 
+def test_a_registered_work_carries_its_toolsets_as_the_tools_footer(
+    monkeypatch, tmp_path
+):
+    """The third marker: `runcreate` rebuilds `tools/` from this line, so it
+    rides in the description, which `next_work` already reads."""
+    fake = Plane()
+    wire(monkeypatch, fake)
+    plane.register_plan(
+        "FreeForge", "create-x", plan_file(tmp_path), ["toolset-image", "toolset-video"]
+    )
+    body = fake.bodies("POST", "/issues/")[0]
+    assert body["description_html"].endswith("[TOOLS] toolset-image, toolset-video</p>")
+
+
+def test_no_toolsets_means_no_footer_at_all(monkeypatch, tmp_path):
+    fake = Plane()
+    wire(monkeypatch, fake)
+    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path), [])
+    assert plane.TOOLS_MARKER not in fake.bodies("POST", "/issues/")[0]["description_html"]
+
+
+def test_the_tools_footer_survives_the_round_trip_through_plane():
+    """Composed here, read back after Plane's HTML escaping in `works`."""
+    described = plane.with_tools_footer("One 64x64 PNG.", ["toolset-image"])
+    recovered = shared.html_to_text(shared.description_html(described))
+    assert plane.split_tools_footer(recovered) == ("One 64x64 PNG.", ["toolset-image"])
+
+
+def test_a_description_without_the_footer_answers_none_not_empty():
+    """`None` is 'no footer, give it everything'; `[]` would be 'give it
+    nothing', which is not what a hand-made Work means."""
+    assert plane.split_tools_footer("One 64x64 PNG.") == ("One 64x64 PNG.", None)
+
+
 def test_a_created_project_carries_the_auto_marker(monkeypatch, tmp_path):
     fake = Plane(projects=[])
     wire(monkeypatch, fake)

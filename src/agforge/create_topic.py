@@ -119,9 +119,9 @@ def run_generator(cwd: Path) -> str:
     )
 
 
-def register_plan(channel: str, topic: str, plan: Path) -> str:
+def register_plan(channel: str, topic: str, plan: Path, tools=()) -> str:
     """Wrapped so the whole Plane route stays behind one name here."""
-    return plane_register_plan(channel, topic, plan)
+    return plane_register_plan(channel, topic, plan, tools)
 
 
 def place_toolsets(front_dir: Path, generator_dir: Path) -> list[str]:
@@ -149,14 +149,16 @@ def handle_generator(channel: str, topic: str, front_dir: Path, number: int) -> 
         return []
     generator_dir = generation_dir(channel, topic, number, "generator")
     shutil.copyfile(required, generator_dir / REQUIRED_ITEMS)
-    place_toolsets(front_dir, generator_dir)
+    placed = place_toolsets(front_dir, generator_dir)
 
     answer = run_generator(generator_dir)
 
     sections: list[str] = []
     plan = generator_dir / PLAN_FILE
     if plan.is_file():
-        sections.append(register_plan(channel, topic, plan))
+        # The Work carries the toolsets it was planned with, so the run that
+        # executes it later gets the same `tools/`.
+        sections.append(register_plan(channel, topic, plan, placed))
     idea = generator_dir / IDEA_FILE
     if idea.is_file():
         sections.append(idea.read_text(encoding="utf-8").strip())

@@ -52,6 +52,12 @@ PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}$")
 # execute (autolab's is `AUTO`).
 AUTO_MARKER = "[AUTO]"
 FORGE_LABEL = "FORGEAUTO"
+
+# The third marker: which toolsets this Work was planned with, carried as the
+# description's last line so `runcreate` can rebuild the same `tools/`. It
+# rides in the description rather than a comment because `next_work` already
+# reads the description, and comments would need a new list API in agag.plane.
+TOOLS_MARKER = "[TOOLS]"
 FALLBACK_DESCRIPTION = f"{AUTO_MARKER} agforge request records: {FALLBACK_PROJECT}"
 
 _LABEL_CACHE: dict[tuple[str, str], str] = {}
@@ -59,12 +65,48 @@ _LABEL_CACHE: dict[tuple[str, str], str] = {}
 __all__ = [
     "AUTO_MARKER",
     "FORGE_LABEL",
+    "TOOLS_MARKER",
     "PlaneError",
     "ensure_label",
     "external_id",
     "register_plan",
     "resolve_project",
+    "split_tools_footer",
+    "with_tools_footer",
 ]
+
+
+def with_tools_footer(description: str, names) -> str:
+    """The description plus its `[TOOLS] a, b` last line.
+
+    No toolsets, no line: a Work planned without any is indistinguishable
+    from a hand-made one, and both are answered the same way — with the
+    whole library.
+    """
+    listed = [str(name).strip() for name in names if str(name).strip()]
+    if not listed:
+        return description
+    footer = f"{TOOLS_MARKER} {', '.join(listed)}"
+    body = description.rstrip()
+    return f"{body}\n{footer}" if body else footer
+
+
+def split_tools_footer(description: str) -> tuple[str, list[str] | None]:
+    """`(description without the footer, the names)`, or `(description, None)`.
+
+    `None` is not the same as `[]`: it says this Work carries no footer at
+    all — hand-made, or from before this phase — and the caller answers that
+    with every toolset rather than with none.
+    """
+    kept: list[str] = []
+    names: list[str] | None = None
+    for line in description.splitlines():
+        if line.strip().upper().startswith(TOOLS_MARKER):
+            tail = line.strip()[len(TOOLS_MARKER):]
+            names = [part.strip() for part in tail.split(",") if part.strip()]
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip(), names
 
 
 def load_plane_config(path: Path | None = None):
@@ -147,13 +189,16 @@ def resolve_project(config, channel: str) -> tuple[dict, str | None]:
     return _fallback(config), note
 
 
-def register_plan(channel: str, topic: str, plan: Path) -> str:
+def register_plan(channel: str, topic: str, plan: Path, tools=()) -> str:
     """Register one generator `plan.md` as this topic's Plane Work.
 
+    `tools` are the toolsets this generation actually placed in `tools/`;
+    they travel to the executing run as the description's `[TOOLS]` footer.
     Returns the report line(s) for the topic. Updating through the same
     external key is what keeps one topic to one Work.
     """
     title, description = split_document(plan.read_text(encoding="utf-8"))
+    description = with_tools_footer(description, tools)
     config = load_plane_config()
     project, note = resolve_project(config, channel)
     project_id = str(project["id"])

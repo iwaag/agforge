@@ -141,7 +141,9 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
     monkeypatch.setattr(
         create_topic,
         "register_plan",
-        lambda channel, topic, plan: calls.append(("plan", plan)) or "registered PA-1",
+        lambda channel, topic, plan, tools: (
+            calls.append(("plan", plan, tools)) or "registered PA-1"
+        ),
     )
 
     create_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
@@ -241,7 +243,7 @@ def test_a_plane_failure_is_reported_not_swallowed(monkeypatch, tmp_path):
     wire(monkeypatch, tmp_path, calls, writes_required=True,
          writes=(("plan.md", "# Bird\n\nDraw it."),))
 
-    def explode(channel, topic, plan):
+    def explode(channel, topic, plan, tools):
         raise create_topic.ListenerError("plane is down")
 
     monkeypatch.setattr(create_topic, "register_plan", explode)

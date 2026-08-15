@@ -7,9 +7,13 @@ executed by the generator in the Work's own persistent workspace, and the
 result is delivered back to the topic the request originally came from.
 
 The workspace is `.local/agentws/<work id>/generator/` — per Work, not per
-topic, and never deleted. A re-trigger overwrites `plan.md`/`tools.md` in
-place and leaves `result/`/`intermediate/` as they are; there is no dirty
+topic, and never deleted. A re-trigger rebuilds `plan.md` and `tools/` from
+the Work and leaves `result/`/`intermediate/` as they are; there is no dirty
 check on purpose (the braindump drops autolab's create/delete dance).
+
+`tools/` is what the Work's `[TOOLS]` description footer names — the
+toolsets the create flow planned it with. A Work without that footer is
+hand-made, or predates this phase, and gets the whole library.
 
 After the ack, every path posts to the topic before returning: the sweep only
 re-fires when the last poster is not the bot, so the final post is both the
@@ -25,7 +29,8 @@ from agag.plane import compose_document, description_html
 from agag.topics import guide as shared_guide, next_record_path
 from agag.zulip import ZulipClient, log, topic_write
 
-from . import generate
+from . import generate, toolsets
+from .plane import split_tools_footer
 from .role_run import AGFORGE_ROOT, run_role
 from .works import Work, next_work, report_work
 from .zulip_chat import SWEEP_ACK
@@ -34,18 +39,24 @@ AGENTWS_ROOT = AGFORGE_ROOT / ".local" / "agentws"
 GUIDES = AGFORGE_ROOT / "agent" / "guides"
 RECORDS_ROOT = AGFORGE_ROOT / ".local" / "agent"
 
-# The same file the create flow copies: the generator's tool vocabulary is
-# one document, wherever the run happens.
-TOOLS_FILE = GUIDES / "create_generator" / "tools.md"
+TOOLS_DIR = "tools"
+
+# The generator's own verdict on its run, from `runcreate_generator/guide.md`.
+# The exit code stays the first-class failure signal; this is the agent
+# saying so itself when the harness saw nothing wrong.
+FAILURE_FLAG = "failure.flag"
 
 # Real work, not a planning pass: autolab's work run uses 1200 s and the
 # create-flow generator 900 s; this sits at the top of that range.
 RUNCREATE_TIMEOUT_SECONDS = 1200
 
 NO_WORK_REPLY = "no work"
+FAILED_PREFIX = "the run reported failure; what it produced follows"
 
 __all__ = [
     "AGENTWS_ROOT",
+    "FAILED_PREFIX",
+    "FAILURE_FLAG",
     "NO_WORK_REPLY",
     "ListenerError",
     "deliver_to_origin",
@@ -72,15 +83,25 @@ def prepare_workspace(work: Work) -> Path:
     """Build (or refresh) the Work's workspace.
 
     `plan.md` is the Work itself, in the same document shape `register_plan`
-    split it from; `tools.md` is the create flow's copy. Both are overwritten
-    on a re-trigger; `result/` and `intermediate/` are left as they are.
+    split it from, minus the `[TOOLS]` footer — that line is addressed to
+    this function, not to the generator. `tools/` is rebuilt from it, both
+    derived from the Work and both replaced on a re-trigger; `result/` and
+    `intermediate/` are left as they are.
+
+    A leftover `failure.flag` is removed here, so a re-trigger starts clean
+    and the flag found after the run is this run's own verdict.
     """
     workspace = workspace_dir(work.issue_id)
     workspace.mkdir(parents=True, exist_ok=True)
+    description, requested = split_tools_footer(work.description)
     (workspace / "plan.md").write_text(
-        compose_document(work.name, description_html(work.description)), encoding="utf-8"
+        compose_document(work.name, description_html(description)), encoding="utf-8"
     )
-    shutil.copyfile(TOOLS_FILE, workspace / "tools.md")
+    shutil.rmtree(workspace / TOOLS_DIR, ignore_errors=True)
+    toolsets.place(
+        toolsets.names() if requested is None else requested, workspace / TOOLS_DIR
+    )
+    (workspace / FAILURE_FLAG).unlink(missing_ok=True)
     (workspace / "result").mkdir(exist_ok=True)
     (workspace / "intermediate").mkdir(exist_ok=True)
     return workspace
@@ -120,9 +141,12 @@ def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
 
         step = "generator run"
         answer = run_generator(workspace)
-        # "Success" is the run exiting zero — `run_generator` raised
-        # otherwise. An empty `result/` is a legitimate pure-text outcome,
-        # not a failure signal.
+        # The run exiting zero is not the whole verdict: the guide tells the
+        # generator to leave `failure.flag` when it knows it failed. An empty
+        # `result/` is still a legitimate pure-text outcome, not a signal.
+        succeeded = not (workspace / FAILURE_FLAG).exists()
+        if not succeeded:
+            sections.append(f"{FAILURE_FLAG} is present: the generator reports failure")
 
         step = "packaging the result"
         files = result_files(workspace)
@@ -136,13 +160,19 @@ def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
         else:
             delivery = answer
             sections.append("result/ is empty; delivering the answer text")
+        if not succeeded:
+            # The requester hears the same verdict the Work does; whatever
+            # the run did produce still travels with it.
+            delivery = f"{FAILED_PREFIX}\n\n{delivery}"
 
         step = "origin delivery"
         sections.append(deliver_to_origin(client, chosen, delivery))
 
         step = "reporting to plane"
+        # `success=False` leaves the Work in its unstarted state, so it stays
+        # selectable and a re-trigger runs it again.
         label, commented, completed = report_work(
-            chosen.project_id, chosen.issue_id, answer, True
+            chosen.project_id, chosen.issue_id, answer, succeeded
         )
         sections.append(
             f"work {label}: commented {'yes' if commented else 'no'}, "

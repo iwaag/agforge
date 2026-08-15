@@ -8,12 +8,13 @@ check), and `dispatch`'s routing. Nothing asserts what an agent said.
 
 import pytest
 
-from agforge import runcreate_topic, zulip_listener
+from agforge import runcreate_topic, toolsets, zulip_listener
 from agforge.works import Work
 
 CHANNEL = "FreeForge"
 TOPIC = "runcreate-20260815"
-WORK = Work("p-free", "issue-1", "Draw the bird", "One 64x64 PNG.",
+WORK = Work("p-free", "issue-1", "Draw the bird",
+            "One 64x64 PNG.\n[TOOLS] toolset-image",
             "agforge", "FreeForge/create-x")
 
 
@@ -22,8 +23,15 @@ class Client:
 
 
 def wire(monkeypatch, tmp_path, calls, *, chosen=WORK, answer="made it",
-         result_writes=()):
+         result_writes=(), fails=False):
     monkeypatch.setattr(runcreate_topic, "AGENTWS_ROOT", tmp_path / "agentws")
+    # A test-owned toolset library: nothing here depends on which toolsets
+    # the repository happens to ship.
+    library = tmp_path / "toolsets"
+    library.mkdir(exist_ok=True)
+    (library / "toolset-image.md").write_text("# Description\nImages\n")
+    (library / "toolset-video.md").write_text("# Description\nVideo\n")
+    monkeypatch.setattr(toolsets, "TOOLSETS_DIR", library)
     monkeypatch.setattr(runcreate_topic, "RECORDS_ROOT", tmp_path / "records")
     monkeypatch.setattr(
         runcreate_topic,
@@ -36,6 +44,8 @@ def wire(monkeypatch, tmp_path, calls, *, chosen=WORK, answer="made it",
         calls.append(("generator", workspace))
         for name, body in result_writes:
             (workspace / "result" / name).write_text(body)
+        if fails:
+            (workspace / runcreate_topic.FAILURE_FLAG).write_text("")
         return answer
 
     monkeypatch.setattr(runcreate_topic, "run_generator", generator_run)
@@ -83,8 +93,10 @@ def test_success_builds_the_workspace_runs_and_summarizes(monkeypatch, tmp_path)
         "write", "generator", "write", "report", "write",
     ]
     assert calls[1][1] == workspace
+    # The [TOOLS] footer is addressed to prepare_workspace, not the agent:
+    # it names tools/ and never reaches plan.md.
     assert (workspace / "plan.md").read_text() == "# Draw the bird\n\nOne 64x64 PNG.\n"
-    assert "generate.sh" in (workspace / "tools.md").read_text()
+    assert [p.name for p in (workspace / "tools").iterdir()] == ["toolset-image.md"]
     assert (workspace / "result").is_dir()
     assert (workspace / "intermediate").is_dir()
     summary = calls[-1][2]
@@ -174,7 +186,7 @@ def test_a_failed_origin_post_still_reports_and_summarizes(monkeypatch, tmp_path
 
 
 def test_a_retrigger_overwrites_in_place_and_keeps_results(monkeypatch, tmp_path):
-    """Persistent workspace, no dirty check: plan.md/tools.md are refreshed,
+    """Persistent workspace, no dirty check: plan.md and tools/ are rebuilt,
     result/ and intermediate/ keep whatever an earlier run left."""
     calls = []
     wire(monkeypatch, tmp_path, calls)
@@ -187,6 +199,69 @@ def test_a_retrigger_overwrites_in_place_and_keeps_results(monkeypatch, tmp_path
 
     assert (workspace / "plan.md").read_text() == "# Draw the bird\n\nOne 64x64 PNG.\n"
     assert (workspace / "result" / "bird.png").read_text() == "old bytes"
+
+
+# --- (b'') the [TOOLS] footer and failure.flag ------------------------------
+
+
+def test_a_work_without_the_footer_gets_the_whole_library(monkeypatch, tmp_path):
+    """Hand-made Works, and every Work made before this phase, carry no
+    footer. Giving them everything is what keeps them executable."""
+    handmade = Work("p-free", "issue-1", "Draw the bird", "One 64x64 PNG.", "", "")
+    calls = []
+    wire(monkeypatch, tmp_path, calls, chosen=handmade)
+    runcreate_topic.handle_runcreate(Client(), CHANNEL, TOPIC)
+    assert sorted(p.name for p in (ws(tmp_path) / "tools").iterdir()) == [
+        "toolset-image.md", "toolset-video.md",
+    ]
+
+
+def test_an_unknown_footer_name_is_skipped_not_fatal(monkeypatch, tmp_path):
+    work = Work("p-free", "issue-1", "Draw the bird",
+                "One 64x64 PNG.\n[TOOLS] toolset-image, toolset-gone",
+                "agforge", "FreeForge/create-x")
+    calls = []
+    wire(monkeypatch, tmp_path, calls, chosen=work)
+    runcreate_topic.handle_runcreate(Client(), CHANNEL, TOPIC)
+    assert [p.name for p in (ws(tmp_path) / "tools").iterdir()] == ["toolset-image.md"]
+    assert any(call[0] == "generator" for call in calls)
+
+
+def test_a_retrigger_rebuilds_tools_from_the_current_footer(monkeypatch, tmp_path):
+    """`tools/` is derived from the Work, like plan.md — a toolset dropped
+    from the footer must not linger from the previous run."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls)
+    runcreate_topic.handle_runcreate(Client(), CHANNEL, TOPIC)
+    (ws(tmp_path) / "tools" / "toolset-video.md").write_text("stale")
+
+    runcreate_topic.handle_runcreate(Client(), CHANNEL, TOPIC)
+    assert [p.name for p in (ws(tmp_path) / "tools").iterdir()] == ["toolset-image.md"]
+
+
+def test_failure_flag_makes_the_run_a_failure(monkeypatch, tmp_path):
+    """The exit code is the first-class signal; the flag is the agent's own
+    verdict on top of it. `success=False` keeps the Work selectable."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls, fails=True)
+    runcreate_topic.handle_runcreate(Client(), CHANNEL, TOPIC)
+
+    assert ("report", "p-free", "issue-1", "made it", False) in calls
+    assert runcreate_topic.FAILURE_FLAG in calls[-1][2]
+    origin_post = next(c for c in calls if c[0] == "write" and c[1] == "create-x")
+    assert origin_post[2].startswith(runcreate_topic.FAILED_PREFIX)
+    assert "made it" in origin_post[2]
+
+
+def test_a_leftover_flag_does_not_fail_the_next_run(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls, fails=True)
+    runcreate_topic.handle_runcreate(Client(), CHANNEL, TOPIC)
+
+    wire(monkeypatch, tmp_path, calls, fails=False)
+    runcreate_topic.handle_runcreate(Client(), CHANNEL, TOPIC)
+    assert ("report", "p-free", "issue-1", "made it", True) in calls
+    assert not (ws(tmp_path) / runcreate_topic.FAILURE_FLAG).exists()
 
 
 # --- (c) an exception mid-way names its step --------------------------------
