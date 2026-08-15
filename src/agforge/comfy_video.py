@@ -45,6 +45,7 @@ POLL_TIMEOUT_SECONDS = 600
 
 __all__ = [
     "add_arguments",
+    "free_memory",
     "generate_video",
     "load_workflow",
     "output_references",
@@ -87,6 +88,29 @@ def load_workflow(prompt: str, path: Path | None = None) -> dict:
     if not injected:
         sys.exit(f"{workflow_path} has no {PROMPT_CLASS} node to take the prompt")
     return workflow
+
+
+def free_memory(base: str) -> bool:
+    """Ask an idle ComfyUI to unload whatever models it still holds.
+
+    This workflow needs ~45 GiB of the 47 GiB device, so a previous run's
+    resident models are enough to fail the next one — observed twice on
+    2026-08-15, both times `MiniMaxH3ImageToVideo` asking for 500 MiB with
+    72 MiB free. Freeing is skipped when anything is queued or running: this
+    is a shared GPU, and unloading under someone else's job would trade our
+    failure for theirs. Best effort — a server that will not answer this is
+    reported by the run that follows, not here.
+    """
+    try:
+        queue = requests.get(f"{base}/queue", timeout=15).json()
+        if queue.get("queue_running") or queue.get("queue_pending"):
+            return False
+        requests.post(
+            f"{base}/free", json={"unload_models": True, "free_memory": True}, timeout=60
+        )
+    except (requests.RequestException, ValueError):
+        return False
+    return True
 
 
 def submit(base: str, workflow: dict) -> str:
@@ -151,7 +175,10 @@ def wait_for_outputs(
 def generate_video(comfyui_url: str, prompt: str) -> Path:
     """One video from one prompt, downloaded into `.local/out/`."""
     base = comfyui_url.rstrip("/")
-    prompt_id = submit(base, load_workflow(prompt))
+    workflow = load_workflow(prompt)
+    free_memory(base)
+    print("generating; this takes several minutes", file=sys.stderr)
+    prompt_id = submit(base, workflow)
     print(f"comfyui prompt_id: {prompt_id}", file=sys.stderr)
     reference = wait_for_outputs(base, prompt_id)[0]
 

@@ -52,7 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
         "generate", help="one 5-second video from a prompt",
         description="Generate one 5-second video via ComfyUI and print its "
                     "time-limited download URL as the last line. The prompt "
-                    "is the only parameter.",
+                    "is the only parameter. The run takes several minutes and "
+                    "the URL appears only when it is over; wait for it.",
     )
     comfy_video.add_arguments(video_generate)
     video_generate.set_defaults(run=_run_video_generate, parser=video_generate)

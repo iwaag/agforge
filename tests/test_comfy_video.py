@@ -98,6 +98,54 @@ def test_an_empty_prompt_costs_no_call(monkeypatch):
     assert message(error) == "prompt is empty"
 
 
+# --- making room on the GPU -------------------------------------------------
+
+
+class Server:
+    """A ComfyUI whose whole surface is the two calls `free_memory` makes."""
+
+    def __init__(self, running=(), pending=()):
+        self.queue = {"queue_running": list(running), "queue_pending": list(pending)}
+        self.freed = []
+
+    def get(self, url, timeout=None):
+        assert url.endswith("/queue")
+        return type("R", (), {"json": lambda _self: self.queue})()
+
+    def post(self, url, json=None, timeout=None):
+        self.freed.append(json)
+        return type("R", (), {"status_code": 200})()
+
+
+def test_an_idle_server_is_asked_to_unload_its_models(monkeypatch):
+    """This workflow needs nearly the whole device; a previous run's resident
+    models are enough to fail the next one."""
+    server = Server()
+    monkeypatch.setattr(comfy_video.requests, "get", server.get)
+    monkeypatch.setattr(comfy_video.requests, "post", server.post)
+    assert comfy_video.free_memory("http://comfy.invalid") is True
+    assert server.freed == [{"unload_models": True, "free_memory": True}]
+
+
+def test_a_busy_server_is_left_alone(monkeypatch):
+    """Shared GPU: unloading under someone else's job would trade our failure
+    for theirs."""
+    server = Server(running=[{"id": "someone else's"}])
+    monkeypatch.setattr(comfy_video.requests, "get", server.get)
+    monkeypatch.setattr(comfy_video.requests, "post", server.post)
+    assert comfy_video.free_memory("http://comfy.invalid") is False
+    assert server.freed == []
+
+
+def test_an_unreachable_server_is_not_fatal_here(monkeypatch):
+    """The run that follows reports it; this call is only an optimization."""
+    def explode(*args, **kwargs):
+        raise comfy_video.requests.RequestException("connection refused")
+
+    monkeypatch.setattr(comfy_video.requests, "get", explode)
+    assert comfy_video.free_memory("http://comfy.invalid") is False
+
+
 # --- reading what ComfyUI answered ------------------------------------------
 
 
