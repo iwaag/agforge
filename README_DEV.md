@@ -17,10 +17,31 @@ workspace root).
 
 ## Map
 
-- `scripts/generate.sh [--ttl MIN] [--model N] [--width W --height H]
-  [--steps N] [--cfgscale N] [--seed N] "<prompt>"` — SwarmUI →
-  `.local/out/` → MinIO → presigned URL on the last line of stdout, local
-  path on stderr.
+- `agforge` — the one CLI the agents are given, reached by its bare name
+  (`scripts/agforge`, put on every role's PATH by
+  `role_run.tool_environment`). `--help` on any subcommand is the usage
+  information; nothing repeats it in a guide.
+  - `agforge toolsets --list` — one `name, description` line per
+    `agent/toolsets/toolset-*.md`. The front copies the ones it wants into
+    `toolsets.csv`.
+  - `agforge image generate [--ttl MIN] [--model N] [--width W --height H]
+    [--steps N] [--cfgscale N] [--seed N] "<prompt>"` — SwarmUI →
+    `.local/out/` → MinIO → presigned URL on the last line of stdout, local
+    path on stderr. `scripts/generate.sh` is the same run, kept for
+    `service/charter.md`.
+  - `agforge video generate --prompt "<prompt>"` — ComfyUI
+    (`AGFORGE_COMFYUI_URL`, the API-format workflow in
+    `.local/resources/comfywf/video/`) → the same delivery contract. One
+    5-second clip with sound; the prompt is the only parameter, and a run
+    takes minutes.
+- `agent/toolsets/toolset-*.md` — one document per toolset, opening with a
+  `# Description` section. They are the generator's tool vocabulary, and the
+  unit the whole create flow moves around: the front's `toolsets.csv`
+  becomes `generator/tools/`, the resulting Work carries a
+  `[TOOLS] toolset-image, …` footer on its description, and `runcreate`
+  rebuilds the same `tools/` from that footer (no footer — hand-made Work —
+  means the whole library). `src/agforge/toolsets.py` is the only reader.
+- `agent/guides/` — what each role is told, per flow.
 - `uv run service/transform.py [--format png|jpeg] [--width W --height H]
   <file>` — resize/convert/re-upload; fresh URL on the last line. No flags
   = upload as-is. `service/transform.py` is a launcher for the
@@ -37,8 +58,11 @@ workspace root).
 - `agents.toml` — committed `ag.agent-config.v1` models, profiles, and the
   `generator` role. `.local/agents.local.toml` supplies executable paths,
   provider endpoints, and an optional local profile selection.
-- Tool grants: `CLAUDE_ALLOWED_TOOLS` in `src/agforge/agent_run.py` for
-  Claude Code. agcode needs no grant file — it offers its four built-in tools
+- Tool grants: `ROLE_ALLOWED_TOOLS` / `CLAUDE_ALLOWED_TOOLS` in
+  `src/agforge/role_run.py`, one entry per role. A role missing from that
+  table gets no `--allowedTools` and then waits on a permission prompt until
+  its timeout; a role told to run a command it was not granted does the
+  same. agcode needs no grant file — it offers its four built-in tools
   and has no permission engine, so `run` is the whole shell surface.
 - `src/agforge/` — the installed application package. Files under `service/`
   and `scripts/` are compatibility launchers or runtime documents.
@@ -93,6 +117,7 @@ SwarmUI's server defaults.
 
 ```sh
 AGFORGE_SWARMUI_URL=       # SwarmUI base URL
+AGFORGE_COMFYUI_URL=       # ComfyUI base URL, for `agforge video generate`
 AGFORGE_SWARMUI_MODEL=     # from /API/ListModels; no default exists
 AGFORGE_S3_ENDPOINT=       # MinIO endpoint recipients can reach, not localhost
 AGFORGE_S3_BUCKET=agforge  # agforge's own bucket
