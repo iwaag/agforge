@@ -191,10 +191,11 @@ command = "/definitely/absent/python"
 
 
 def test_agcode_needs_no_declared_provider_endpoint(tmp_path):
-    """OpenCode could not be pointed at ollama without an explicit base_url,
-    so resolution refused one. agcode has its own local default, and the
-    endpoint is only supplied when it is not that default — so an overlay
-    without a provider block resolves rather than failing."""
+    """Resolution used to refuse an ollama profile with no declared endpoint:
+    the harness of the day could not be pointed at one without it. agcode has
+    its own local default, and the endpoint is only supplied when it is not
+    that default — so an overlay without a provider block resolves rather
+    than failing."""
     main, local = files(tmp_path, overlay='schema = "ag.agent-config.v1"\n')
     config, overlay = agent_config.load_config(main, local)
     resolved = agent_config.resolve_role(config, overlay, "generator")
