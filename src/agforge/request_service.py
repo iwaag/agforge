@@ -10,7 +10,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import agent_run
+from . import agent_run, generate
 
 AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 PORT = int(os.environ.get("AGFORGE_SERVICE_PORT", "8092"))
@@ -86,14 +86,54 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, job)
         return self.send_json(404, {"error": "not_found"})
 
+    def read_json(self) -> object:
+        length = int(self.headers.get("Content-Length", "0"))
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def do_resign(self, parsed: object) -> None:
+        """Re-sign an object already in the bucket: no upload, no agent run.
+
+        A delivery's presigned URL lives `DEFAULT_TTL_MINUTES`; the object
+        behind it lives on. A consumer that kept the `[S3KEY]` footer asks
+        here for a fresh URL immediately before it needs one, rather than
+        hoping the link it was handed has not expired in the meantime.
+        """
+        key = parsed.get("key") if isinstance(parsed, dict) else None
+        if not isinstance(key, str) or not key.strip():
+            return self.send_json(
+                400, {"error": "bad_request", "detail": 'body must be {"key": "<s3 object key>"}'}
+            )
+        key = key.strip()
+        try:
+            env = generate.load_env()
+            if not generate.object_exists(env, key):
+                return self.send_json(
+                    404, {"error": "not_found", "detail": f"no object at {key!r}"}
+                )
+            url = generate.presign(env, key, generate.DEFAULT_TTL_MINUTES)
+        except SystemExit as error:
+            # `generate` answers a missing configuration by exiting, which is
+            # right for the CLI it serves and would kill this thread here.
+            return self.send_json(500, {"error": "misconfigured", "detail": str(error)})
+        return self.send_json(
+            200,
+            {
+                "key": key,
+                "url": url,
+                "expires_in_minutes": generate.DEFAULT_TTL_MINUTES,
+            },
+        )
+
     def do_POST(self) -> None:
-        if self.path.rstrip("/") != "/api/requests":
+        route = self.path.rstrip("/")
+        if route not in ("/api/requests", "/api/resign"):
             return self.send_json(404, {"error": "not_found"})
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            parsed = json.loads(self.rfile.read(length).decode("utf-8"))
+            parsed = self.read_json()
         except (ValueError, json.JSONDecodeError):
             return self.send_json(400, {"error": "bad_request", "detail": "body must be JSON"})
+        if route == "/api/resign":
+            return self.do_resign(parsed)
         desire = parsed.get("desire") if isinstance(parsed, dict) else None
         if not isinstance(desire, str):
             return self.send_json(

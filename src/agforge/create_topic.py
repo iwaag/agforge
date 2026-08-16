@@ -56,22 +56,49 @@ TOOLSETS_CSV = "toolsets.csv"
 TOOLS_DIR = "tools"
 PLAN_FILE = "plan.md"
 IDEA_FILE = "idea.md"
+# The generator's own signal that it answered with a question instead of a
+# plan (`create_generator/guide_plan.md`). A question posted into a topic
+# nobody is watching is a conversation that stalls, so the reply gets a Zulip
+# mention of whoever spoke last.
+QUESTION_FLAG = "question.flag"
 
 EMPTY_REPLY = "There is nothing in this topic to answer yet."
 
 __all__ = [
+    "QUESTION_FLAG",
     "ListenerError",
     "front_prompt",
     "generation_dir",
     "guide",
     "handle_generator",
     "handle_topic",
+    "last_other_sender",
+    "mention",
     "place_toolsets",
     "register_plan",
     "run_front",
     "run_generator",
     "topic_workspace",
 ]
+
+
+def last_other_sender(messages: list[dict], self_id: int) -> str | None:
+    """The full name of the most recent poster who is not this bot.
+
+    The realm hides real email addresses, and Zulip's `@**Full Name**` syntax
+    wants exactly this — so the name that already travels in the message list
+    for `chatlog.md` is the whole lookup. `None` when only the bot has spoken.
+    """
+    for message in reversed(messages):
+        if message.get("sender_id") == self_id:
+            continue
+        if name := str(message.get("sender_full_name") or "").strip():
+            return name
+    return None
+
+
+def mention(name: str) -> str:
+    return f"@**{name}**"
 
 
 class ListenerError(RuntimeError):
@@ -138,11 +165,15 @@ def place_toolsets(front_dir: Path, generator_dir: Path) -> list[str]:
     return toolsets.place(requested, generator_dir / TOOLS_DIR)
 
 
-def handle_generator(channel: str, topic: str, front_dir: Path, number: int) -> list[str]:
+def handle_generator(
+    channel: str, topic: str, front_dir: Path, number: int, asking: str | None = None
+) -> list[str]:
     """The `required_items.md` branch: build the generator workspace, run it.
 
     What the front *wrote* drives this, not what it said — its answer is
-    relayed verbatim and never parsed.
+    relayed verbatim and never parsed. `question.flag` is the one exception,
+    and even then nothing in the answer is read: the flag alone decides that
+    `asking` — the last non-forge poster — gets mentioned above it.
     """
     required = front_dir / REQUIRED_ITEMS
     if not required.is_file():
@@ -163,6 +194,8 @@ def handle_generator(channel: str, topic: str, front_dir: Path, number: int) -> 
     if idea.is_file():
         sections.append(idea.read_text(encoding="utf-8").strip())
     sections.append(answer)
+    if (generator_dir / QUESTION_FLAG).is_file() and asking:
+        sections.insert(0, mention(asking))
     return sections
 
 
@@ -181,7 +214,15 @@ def serve(context) -> TopicResult:
     context.post(answer)
 
     context.step = "generator"
-    return TopicResult(handle_generator(context.channel, context.topic, front_dir, number))
+    return TopicResult(
+        handle_generator(
+            context.channel,
+            context.topic,
+            front_dir,
+            number,
+            last_other_sender(context.history, context.self_id),
+        )
+    )
 
 
 def handle_topic(client: ZulipClient, channel: str, topic: str) -> None:

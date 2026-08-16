@@ -78,9 +78,22 @@ workspace root).
 POST /api/requests      { "desire": "<prompt text>" } -> 202 { "request_id" }
 GET  /api/requests/{id} -> "status": "working" while the run is going,
                            then the agent's own JSON, served unvalidated
+POST /api/resign        { "key": "<s3 object key>" }
+                        -> 200 { "key", "url", "expires_in_minutes" }
+                        -> 404 when the bucket no longer holds the key
+                        -> 500 { "error": "misconfigured" } without .local/.env
 GET  /guide             -> service/GUIDE.md as text/plain (also /api/guide)
 GET  /healthz           -> { "ok": true }
 ```
+
+`/api/resign` is a pure script — no agent run, no upload, no cost. A delivery's
+presigned URL lives `DEFAULT_TTL_MINUTES` (60); the object behind it lives on.
+Every delivery therefore carries its key as an `[S3KEY] <key>` last line, in
+both the chat post and the Plane comment, and a consumer re-signs that key
+immediately before it needs a live URL rather than hoping the link it was
+handed has not expired. The 404 exists because signing is a pure signature
+operation: it succeeds for a key that was never uploaded, and the resulting
+URL fails minutes later somewhere nobody is looking.
 
 The agent writes `.local/jobs/<request_id>/result.json` and every key in
 it is the agent's. Without it, the service reports that the run ended

@@ -53,17 +53,27 @@ RUNCREATE_TIMEOUT_SECONDS = 1200
 NO_WORK_REPLY = "no work"
 FAILED_PREFIX = "the run reported failure; what it produced follows"
 
+# The durable half of a delivery, on its own last line — the same shape as the
+# `[TOOLS]` footer `plane.py` already puts in a description. A presigned URL
+# dies after `generate.DEFAULT_TTL_MINUTES`; the object behind it does not, so
+# whoever reads this later re-signs the key through `POST /api/resign` instead
+# of finding an expired link. Carried by both the delivery post and the Plane
+# comment, because a consumer may only be looking at one of them.
+S3_KEY_MARKER = "[S3KEY]"
+
 __all__ = [
     "AGENTWS_ROOT",
     "FAILED_PREFIX",
     "FAILURE_FLAG",
     "NO_WORK_REPLY",
+    "S3_KEY_MARKER",
     "ListenerError",
     "deliver_to_origin",
     "handle_runcreate",
     "prepare_workspace",
     "result_files",
     "run_generator",
+    "s3_key_footer",
     "upload_result",
     "workspace_dir",
     "zip_result",
@@ -150,13 +160,22 @@ def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
 
         step = "packaging the result"
         files = result_files(workspace)
+        comment = answer
         if files:
+            key, url = upload_result(zip_result(workspace))
+            footer = s3_key_footer(key)
             delivery = (
                 f"result of \"{chosen.name}\" ({len(files)} file(s)), "
                 f"temporary download (expires in {generate.DEFAULT_TTL_MINUTES} min): "
-                f"{upload_result(zip_result(workspace))}"
+                f"{url}\n{footer}"
             )
-            sections.append(f"result/ holds {len(files)} file(s); zipped and uploaded")
+            # The Plane comment is the ledger consumers read months later, so
+            # it carries the key too — never only the URL that outlives it by
+            # an hour.
+            comment = f"{answer}\n\n{footer}" if answer else footer
+            sections.append(
+                f"result/ holds {len(files)} file(s); zipped and uploaded as {key}"
+            )
         else:
             delivery = answer
             sections.append("result/ is empty; delivering the answer text")
@@ -172,7 +191,7 @@ def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
         # `success=False` leaves the Work in its unstarted state, so it stays
         # selectable and a re-trigger runs it again.
         label, commented, completed = report_work(
-            chosen.project_id, chosen.issue_id, answer, succeeded
+            chosen.project_id, chosen.issue_id, comment, succeeded
         )
         sections.append(
             f"work {label}: commented {'yes' if commented else 'no'}, "
@@ -199,19 +218,23 @@ def zip_result(workspace: Path) -> Path:
     ))
 
 
-def upload_result(archive: Path) -> str:
-    """One presigned download URL for the archive.
+def upload_result(archive: Path) -> tuple[str, str]:
+    """`(bucket key, presigned download URL)` for the archive.
 
-    `generate.load_env`/`upload_and_presign` answer a missing configuration
-    with `sys.exit`, which is right for the CLI they serve and wrong here —
-    a SystemExit would sail past the handler's error discipline.
+    `generate.load_env`/`upload_and_presign_key` answer a missing
+    configuration with `sys.exit`, which is right for the CLI they serve and
+    wrong here — a SystemExit would sail past the handler's error discipline.
     """
     try:
-        return generate.upload_and_presign(
+        return generate.upload_and_presign_key(
             generate.load_env(), archive, generate.DEFAULT_TTL_MINUTES
         )
     except SystemExit as error:
         raise ListenerError(f"upload failed: {error}") from error
+
+
+def s3_key_footer(key: str) -> str:
+    return f"{S3_KEY_MARKER} {key}"
 
 
 def deliver_to_origin(client: ZulipClient, work: Work, delivery: str) -> str:

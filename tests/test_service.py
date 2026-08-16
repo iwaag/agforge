@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from agag.agent_config import ResolvedAgent
 
-from agforge import agent_run, request_service
+from agforge import agent_run, generate, request_service
 
 TESTS_DIR = Path(__file__).resolve().parent
 FAKE_AGENT = TESTS_DIR / "fake_agent.py"
@@ -402,3 +402,84 @@ def test_the_card_is_served_raw_and_re_read_per_request(agent, server, monkeypat
 def test_a_missing_card_does_not_break_the_service(monkeypatch, tmp_path):
     monkeypatch.setattr(request_service, "GUIDE_PATH", tmp_path / "absent.md")
     assert "No capability card" in request_service.read_guide()
+
+
+# --- POST /api/resign ------------------------------------------------------
+#
+# A pure script: no agent run, no upload. A delivery's presigned URL lives an
+# hour and the object behind it lives on, so a consumer that kept the [S3KEY]
+# footer asks here for a fresh URL immediately before it needs one.
+
+
+@pytest.fixture
+def bucket(monkeypatch):
+    """Stand in for MinIO: a set of keys that exist, and a signature."""
+    present = {"files/2026-08-16/abc.zip"}
+    monkeypatch.setattr(generate, "load_env", lambda: {"AGFORGE_S3_BUCKET": "agforge"})
+    monkeypatch.setattr(generate, "object_exists", lambda env, key: key in present)
+    monkeypatch.setattr(
+        generate, "presign", lambda env, key, ttl: f"http://minio/{key}?ttl={ttl}"
+    )
+    return present
+
+
+def test_resign_returns_a_fresh_url_for_an_existing_key(agent, server, bucket):
+    status, body = http("POST", f"{server}/api/resign", {"key": "files/2026-08-16/abc.zip"})
+    assert status == 200
+    assert body == {
+        "key": "files/2026-08-16/abc.zip",
+        "url": f"http://minio/files/2026-08-16/abc.zip?ttl={generate.DEFAULT_TTL_MINUTES}",
+        "expires_in_minutes": generate.DEFAULT_TTL_MINUTES,
+    }
+
+
+def test_resign_refuses_a_key_the_bucket_does_not_hold(agent, server, bucket):
+    """Signing is a pure signature operation and succeeds for a key that was
+    never uploaded; the 404 is what turns that into an answer."""
+    status, body = http("POST", f"{server}/api/resign", {"key": "files/gone.zip"})
+    assert status == 404
+    assert body["error"] == "not_found"
+
+
+def test_resign_rejects_a_body_without_a_key(agent, server, bucket):
+    for body in ({"nope": 1}, {"key": ""}, {"key": 7}):
+        status, answer = http("POST", f"{server}/api/resign", body)
+        assert status == 400
+        assert "key" in answer["detail"]
+
+
+def test_resign_reports_a_missing_configuration_instead_of_dying(agent, server, monkeypatch):
+    """`generate` answers a missing .local/.env by exiting, which is right for
+    the CLI it serves and would kill the serving thread here."""
+    def explode():
+        raise SystemExit("missing in .local/.env: AGFORGE_S3_BUCKET")
+
+    monkeypatch.setattr(generate, "load_env", explode)
+    status, body = http("POST", f"{server}/api/resign", {"key": "files/x.zip"})
+    assert status == 500
+    assert body["error"] == "misconfigured"
+    assert "AGFORGE_S3_BUCKET" in body["detail"]
+
+
+def test_an_unknown_post_route_is_still_a_404(agent, server):
+    status, _ = http("POST", f"{server}/api/nope", {"key": "x"})
+    assert status == 404
+
+
+def test_upload_and_presign_keeps_its_url_only_contract(monkeypatch, tmp_path):
+    """The CLI's contract is unchanged by the key-returning split."""
+    monkeypatch.setattr(
+        generate, "upload_and_presign_key", lambda env, path, ttl: ("files/k.zip", "http://u")
+    )
+    assert generate.upload_and_presign({}, tmp_path / "x.zip", 60) == "http://u"
+
+
+@pytest.mark.parametrize(
+    "name,prefix",
+    [("bird.png", "images/"), ("clip.mp4", "files/"), ("result.zip", "files/"),
+     ("notes.bin", "files/")],
+)
+def test_object_key_routes_images_apart_from_everything_else(name, prefix):
+    key = generate.object_key(Path(name))
+    assert key.startswith(prefix)
+    assert key.endswith(Path(name).suffix)

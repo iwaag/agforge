@@ -35,6 +35,12 @@ goes stale as runs accumulate, the files do not.
 - `POST /api/requests {"desire": "<what you want>"}` → `202 {"request_id"}`
 - `GET /api/requests/<id>` → poll; `status` is `working` until the agent
   answers, then whatever the agent wrote.
+- `POST /api/resign {"key": "<s3 object key>"}` →
+  `200 {"key", "url", "expires_in_minutes"}`. Download URLs expire (60 min);
+  the object does not. Every delivery carries its key on an `[S3KEY] <key>`
+  last line — keep that line, and ask here for a fresh URL right before you
+  download. Costs nothing: no agent run, no upload. `404` means the bucket no
+  longer holds that key.
 - `GET /guide` → this file raw. `GET /healthz` → liveness.
 
 Capability and cost questions go in the same `desire` field as the work —

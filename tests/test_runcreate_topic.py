@@ -59,7 +59,10 @@ def wire(monkeypatch, tmp_path, calls, *, chosen=WORK, answer="made it",
     monkeypatch.setattr(
         runcreate_topic,
         "upload_result",
-        lambda archive: calls.append(("upload", archive)) or "http://minio/presigned",
+        lambda archive: (
+            calls.append(("upload", archive))
+            or ("files/2026-08-15/deadbeef.zip", "http://minio/presigned")
+        ),
     )
 
 
@@ -134,10 +137,14 @@ def test_a_nonempty_result_ships_as_a_zip_url(monkeypatch, tmp_path):
     origin_posts = [c for c in calls if c[0] == "write" and c[1] == "create-x"]
     assert len(origin_posts) == 1
     assert "http://minio/presigned" in origin_posts[0][2]
-    # The Plane comment is the generator's answer; a presigned URL expires
-    # and does not belong in a permanent record.
-    assert ("report", "p-free", "issue-1", "made it", True) in calls
-    assert "zipped and uploaded" in calls[-1][2]
+    # The durable half. The URL expires in an hour; whoever reads this later
+    # re-signs the key through POST /api/resign.
+    footer = "[S3KEY] files/2026-08-15/deadbeef.zip"
+    assert origin_posts[0][2].endswith(footer)
+    # The Plane comment is the permanent record, so it carries the key too —
+    # never only the URL that outlives it by an hour.
+    assert ("report", "p-free", "issue-1", f"made it\n\n{footer}", True) in calls
+    assert "zipped and uploaded as files/2026-08-15/deadbeef.zip" in calls[-1][2]
 
 
 def test_the_zip_never_contains_itself(monkeypatch, tmp_path):

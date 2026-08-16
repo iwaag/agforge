@@ -113,7 +113,13 @@ def generate_image(swarmui_url: str, prompt: str, params: dict[str, str]) -> Pat
     return local_path
 
 
-def upload_and_presign(env: dict[str, str], local_path: Path, ttl_minutes: int) -> str:
+def s3_bucket(env: dict[str, str]) -> tuple[object, str]:
+    """`(boto3 client, bucket)` from the environment, or exit saying what for.
+
+    Split out of `upload_and_presign` so that signing an existing key needs no
+    upload: a presigned URL dies after `DEFAULT_TTL_MINUTES`, and the object
+    behind it does not. `/api/resign` is that second lifetime.
+    """
     required = [
         "AGFORGE_S3_ENDPOINT", "AGFORGE_S3_BUCKET",
         "AGFORGE_S3_ACCESS_KEY", "AGFORGE_S3_SECRET_KEY",
@@ -124,24 +130,71 @@ def upload_and_presign(env: dict[str, str], local_path: Path, ttl_minutes: int) 
     bucket = env["AGFORGE_S3_BUCKET"]
     if bucket == "nctl-outbox":
         sys.exit("refusing to write to the nctl-outbox bucket")
-
-    s3 = boto3.client(
+    client = boto3.client(
         "s3",
         endpoint_url=env["AGFORGE_S3_ENDPOINT"],
         aws_access_key_id=env["AGFORGE_S3_ACCESS_KEY"],
         aws_secret_access_key=env["AGFORGE_S3_SECRET_KEY"],
         region_name="us-east-1",
     )
-    suffix = local_path.suffix.lower()
-    content_type = CONTENT_TYPES.get(suffix, "application/octet-stream")
+    return client, bucket
+
+
+def object_key(local_path: Path) -> str:
+    """The bucket key one upload gets: `images|files/<date>/<uuid><suffix>`."""
+    content_type = CONTENT_TYPES.get(local_path.suffix.lower(), "application/octet-stream")
     prefix = "images" if content_type.startswith("image/") else "files"
-    key = f"{prefix}/{date.today().isoformat()}/{uuid.uuid4().hex}{local_path.suffix}"
-    s3.upload_file(str(local_path), bucket, key, ExtraArgs={"ContentType": content_type})
-    return s3.generate_presigned_url(
+    return f"{prefix}/{date.today().isoformat()}/{uuid.uuid4().hex}{local_path.suffix}"
+
+
+def presign(env: dict[str, str], key: str, ttl_minutes: int) -> str:
+    """One fresh download URL for a key that is already in the bucket."""
+    client, bucket = s3_bucket(env)
+    return client.generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": key},
         ExpiresIn=ttl_minutes * 60,
     )
+
+
+def object_exists(env: dict[str, str], key: str) -> bool:
+    """Whether the bucket still holds `key`.
+
+    Presigning is a pure signature operation — it succeeds for a key that was
+    never uploaded, and the resulting URL answers 404 minutes later, somewhere
+    the caller is no longer looking. This is what turns that into an answer.
+    """
+    client, bucket = s3_bucket(env)
+    try:
+        client.head_object(Bucket=bucket, Key=key)
+    except Exception:  # noqa: BLE001 - any failure to confirm is a "no"
+        return False
+    return True
+
+
+def upload_and_presign_key(
+    env: dict[str, str], local_path: Path, ttl_minutes: int
+) -> tuple[str, str]:
+    """Upload one file and return `(key, presigned url)`.
+
+    The key is the durable half. A report that carries only the URL is a
+    report that expires; every consumer that must still reach the file after
+    `ttl_minutes` needs the key and `/api/resign`.
+    """
+    client, bucket = s3_bucket(env)
+    content_type = CONTENT_TYPES.get(local_path.suffix.lower(), "application/octet-stream")
+    key = object_key(local_path)
+    client.upload_file(str(local_path), bucket, key, ExtraArgs={"ContentType": content_type})
+    return key, client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=ttl_minutes * 60,
+    )
+
+
+def upload_and_presign(env: dict[str, str], local_path: Path, ttl_minutes: int) -> str:
+    """Upload one file and return its presigned URL. The CLI's contract."""
+    return upload_and_presign_key(env, local_path, ttl_minutes)[1]
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

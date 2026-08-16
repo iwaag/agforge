@@ -211,6 +211,58 @@ def test_no_csv_leaves_an_empty_tools_directory(monkeypatch, tmp_path):
     assert any(call[0] == "generator" for call in calls)
 
 
+# --- (b3) question.flag → a mention of whoever asked -----------------------
+
+
+def test_question_flag_mentions_the_last_non_forge_poster(monkeypatch, tmp_path):
+    """A question posted into a topic nobody is watching is a conversation
+    that stalls. The flag alone decides this; the answer is never parsed."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls, writes_required=True,
+         writes=((create_topic.QUESTION_FLAG, ""),), generator="what size?")
+    history = [
+        message(name="Developer", content="make me a bird"),
+        message(sender_id=BOT_ID, name="Forge", content="on it", id=2),
+    ]
+
+    create_topic.handle_topic(Client(calls, history=history), CHANNEL, TOPIC)
+
+    assert calls[-2][2] == "@**Developer**\n\nwhat size?"
+
+
+def test_the_mention_names_the_most_recent_asker(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls, writes_required=True,
+         writes=((create_topic.QUESTION_FLAG, ""),), generator="what size?")
+    history = [
+        message(name="Developer", content="make me a bird"),
+        message(sender_id=99, name="Autolab", content="64x64 please", id=2),
+    ]
+
+    create_topic.handle_topic(Client(calls, history=history), CHANNEL, TOPIC)
+
+    assert calls[-2][2].startswith("@**Autolab**")
+
+
+def test_no_question_flag_means_no_mention(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls, writes_required=True, generator="made it")
+    create_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
+    assert calls[-2][2] == "made it"
+    assert "@**" not in calls[-2][2]
+
+
+def test_last_other_sender_ignores_our_own_lines():
+    forge = {"sender_id": BOT_ID, "sender_full_name": "Forge"}
+    human = {"sender_id": HUMAN_ID, "sender_full_name": "Developer"}
+    assert create_topic.last_other_sender([human, forge], BOT_ID) == "Developer"
+    assert create_topic.last_other_sender([forge], BOT_ID) is None
+    assert create_topic.last_other_sender([], BOT_ID) is None
+    # A message with no name is not a mention target; keep looking back.
+    nameless = {"sender_id": 42, "sender_full_name": ""}
+    assert create_topic.last_other_sender([human, nameless], BOT_ID) == "Developer"
+
+
 # --- (c) an exception mid-way: `failed during …` is posted -----------------
 
 
