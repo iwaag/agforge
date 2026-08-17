@@ -25,12 +25,11 @@ character-for-character.
   image via SwarmUI, uploads it, prints the presigned URL as the last
   line of stdout and the local path on stderr as `local: <path>`. Takes
   tens of seconds.
-- Music generation service — its base URL is `MUSIC_GEN_URL` in
-  `.local/music-gen.env`. Start with `source .local/music-gen.env` and fetch
-  `$MUSIC_GEN_URL/guide`; it documents the one `POST /generate` operation and
-  its optional parameters. Call it with curl, then put the returned
-  `audio_url` in your answer. It normally takes a few seconds after ACE-Step
-  is warm.
+- `agforge music generate --prompt "<what it should sound like>"` — generates
+  one instrumental music track via ComfyUI, uploads it, prints the presigned
+  URL as the last line of stdout and the local path on stderr. The prompt is
+  the only parameter. Takes tens of seconds to minutes; run it in the
+  foreground and wait for the URL line.
 - ACE Studio CLI — use `acestudio-cli` when the desire needs sung vocals or
   lyrics rather than an instrumental. It controls the running ACE Studio app
   and documents itself with `acestudio-cli help` and
@@ -38,7 +37,7 @@ character-for-character.
   already on your PATH through an ignored local symlink whose target comes
   from `.local/ace-studio.env`; invoke `acestudio-cli` directly and do not
   `source` the file. For a lyrics request, do not fall back to the instrumental
-  `MUSIC_GEN_URL` path.
+  `agforge music generate` path.
   The public CLI has no export command; the known hand-off is stock singer →
   Sing clip → per-note kana with `language: JPN` → playback, then convert the
   newest `$TMPDIR/ACE Studio/AudioCache/seg_*_<sample-rate>.pcm` (float32

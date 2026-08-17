@@ -8,6 +8,7 @@ The subcommands are the vocabulary the toolset documents in
     agforge toolsets --list       what toolsets exist, one line each
     agforge image generate "…"    SwarmUI  → presigned URL on the last line
     agforge video generate --prompt "…"   ComfyUI → the same contract
+    agforge music generate --prompt "…"   ComfyUI → the same contract
 
 `--help` on any of them is the usage information (Tool Giving); no guide
 text repeats it.
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import comfy_video, generate, toolsets as toolsets_module
+from . import comfy_music, comfy_video, generate, toolsets as toolsets_module
 
 __all__ = ["build_parser", "main"]
 
@@ -58,6 +59,19 @@ def build_parser() -> argparse.ArgumentParser:
     comfy_video.add_arguments(video_generate)
     video_generate.set_defaults(run=_run_video_generate, parser=video_generate)
 
+    music = commands.add_parser("music", help="music generation")
+    music_actions = music.add_subparsers(dest="action", required=True)
+    music_generate = music_actions.add_parser(
+        "generate", help="one music track from a prompt",
+        description="Generate one music track via ComfyUI and print its "
+                    "time-limited download URL as the last line. The prompt "
+                    "is the only parameter. The run takes tens of seconds to "
+                    "minutes and the URL appears only when it is over; wait "
+                    "for it.",
+    )
+    comfy_music.add_arguments(music_generate)
+    music_generate.set_defaults(run=_run_music_generate, parser=music_generate)
+
     return parser
 
 
@@ -76,6 +90,10 @@ def _run_image_generate(args: argparse.Namespace) -> None:
 
 def _run_video_generate(args: argparse.Namespace) -> None:
     comfy_video.run(args)
+
+
+def _run_music_generate(args: argparse.Namespace) -> None:
+    comfy_music.run(args)
 
 
 def main(argv: list[str] | None = None) -> None:

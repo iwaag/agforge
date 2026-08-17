@@ -8,8 +8,8 @@ request: edit it and the next answer changes, no restart.
 - One still image per request, from a free-text desire. One agentic run
   drives the generator, post-processes, and hands back a time-limited
   download URL.
-- One music track per request through the LAN music-generation service. The
-  request agent fetches the service's own guide and returns its audio URL.
+- One instrumental music track per request, generated via ComfyUI from a
+  free-text prompt; delivered as a time-limited download URL like the images.
 - Sung vocals with lyrics through the running ACE Studio desktop app and its
   self-describing CLI. This path uses a stock ACE Studio voice; the agent does
   not clone or upload voices.
