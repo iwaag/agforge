@@ -147,24 +147,24 @@ def read_result(request_id: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def resolve_outcome(request_id: str, output: str) -> tuple[dict, str]:
+def resolve_outcome(request_id: str, output: str, meta: dict | None = None) -> tuple[dict, str]:
     result = read_result(request_id)
     if result is not None:
         job = dict(result)
         job.setdefault("status", "ended")
         return job, "result_file"
     tail = output.strip()[-OUTPUT_TAIL_CHARS:]
-    return (
-        {
-            "status": "ended",
-            "detail": (
-                "the run ended and left nothing for the caller "
-                f"({result_path(request_id)} absent); "
-                f"the agent's last words: {tail}"
-            ),
-        },
-        "nothing",
+    detail = (
+        "the run ended and left nothing for the caller "
+        f"({result_path(request_id)} absent); "
+        f"the agent's last words: {tail}"
     )
+    # A run that said nothing may still have complained on stderr; the shared
+    # harness keeps that tail in meta, and it is the only trace there is.
+    stderr_tail = (meta or {}).get("stderr_tail")
+    if stderr_tail:
+        detail += f"; stderr tail: {stderr_tail}"
+    return ({"status": "ended", "detail": detail}, "nothing")
 
 
 def run_request(
@@ -194,7 +194,7 @@ def run_request(
             job.setdefault("status", "ended")
             return job, meta
         return {"status": "failed", "detail": str(error)}, meta
-    job, source = resolve_outcome(request_id, output)
+    job, source = resolve_outcome(request_id, output, meta)
     meta["output"] = output
     meta["outcome_from"] = source
     outcome = "failed" if job.get("status") == "failed" else "done"

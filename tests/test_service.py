@@ -297,11 +297,15 @@ def test_nonzero_exit_keeps_stderr_tail(agent):
 
 
 def test_empty_output_keeps_stderr_tail(agent):
+    """Since pyagag stopped failing a clean empty run, this arrives as a
+    "left nothing" report — but the stderr evidence must still survive."""
     agent.output("")
     agent.stderr("panic: something harness-side")
-    job, _ = agent_run.run_request("d")
-    assert "agent produced no output" in job["detail"]
+    job, meta = agent_run.run_request("d")
+    assert job["status"] == "ended"
+    assert "left nothing for the caller" in job["detail"]
     assert "stderr tail: panic: something harness-side" in job["detail"]
+    assert meta["empty_final"] is True
 
 
 def test_budget_timeout_fails_loudly(agent):
