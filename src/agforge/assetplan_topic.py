@@ -229,7 +229,7 @@ def serve(context) -> TopicResult:
 
 
 def handle_topic(client: ZulipClient, channel: str, topic: str) -> None:
-    log(f"create topic {channel!r}/{topic!r}")
+    log(f"assetplan topic {channel!r}/{topic!r}")
     serve_topic(
         client, channel, topic, serve,
         ack_text=SWEEP_ACK,
