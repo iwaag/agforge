@@ -1,0 +1,9 @@
+# Copy to .local/instance.toml and set the real name.
+#
+# <agent>-<instance label><N>: the label is the host this instance runs on,
+# the number distinguishes instances sharing a host. This is the name the
+# Zulip account, the Plane account, the instance's own channel and its
+# intro-<name> topic all use.
+#
+# Local-only because the label is host information (devdocs/README_DEV.md).
+name = "agforge-<host><N>"
