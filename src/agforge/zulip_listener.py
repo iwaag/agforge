@@ -21,6 +21,8 @@ from pathlib import Path
 
 from agag.zulip import ZulipClient, channel_name, dm_partners, is_dm_for_us, log, serve, sweep_serve
 
+from .instance import instance_name
+
 AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 ZULIP_ENV = AGFORGE_ROOT / ".local" / "zulip.env"
 
@@ -31,7 +33,24 @@ REQUEST_TOPIC_PREFIX = "create-"
 RUNCREATE_TOPIC_PREFIX = "runcreate-"
 SWEEP_PREFIXES = (RUNCREATE_TOPIC_PREFIX, REQUEST_TOPIC_PREFIX)
 
-__all__ = ["ZULIP_ENV", "dispatch", "handle_message", "log", "main", "observe_topic"]
+__all__ = [
+    "ZULIP_ENV", "dispatch", "entrance_reply", "handle_message", "log", "main",
+    "observe_topic", "topic_filter",
+]
+
+
+def topic_filter(channel: str, topic: str) -> bool:
+    """Sweep every topic in this instance's channel, prefixes elsewhere."""
+    return channel == instance_name() or topic.startswith(SWEEP_PREFIXES)
+
+
+def entrance_reply() -> str:
+    """The p1 placeholder response for questions at this instance's entrance."""
+    name = instance_name()
+    return (
+        f"This is {name}, an asset-generation agent. "
+        f"To request an asset, open a `create-…` topic in `{name}`."
+    )
 
 
 def dispatch(client: ZulipClient, channel: str, topic: str) -> None:
@@ -48,7 +67,10 @@ def dispatch(client: ZulipClient, channel: str, topic: str) -> None:
     if topic.startswith(RUNCREATE_TOPIC_PREFIX):
         handle_runcreate(client, channel, topic)
         return
-    handle_topic(client, channel, topic)
+    if topic.startswith(REQUEST_TOPIC_PREFIX):
+        handle_topic(client, channel, topic)
+        return
+    client.send_to_channel(channel, topic, entrance_reply())
 
 
 def handle_message(client: ZulipClient, message: dict, self_id: int) -> None:
@@ -88,10 +110,10 @@ def main() -> None:
     ).start()
     log(
         "agforge zulip listener starting "
-        f"(pull sweep, prefixes {SWEEP_PREFIXES} + DM thread)"
+        f"(pull sweep: all topics in {instance_name()!r}, prefixes {SWEEP_PREFIXES} elsewhere + DM thread)"
     )
     try:
-        sweep_serve(client, topic_handler, topic_filter=SWEEP_PREFIXES)
+        sweep_serve(client, topic_handler, topic_filter=topic_filter)
     except KeyboardInterrupt:
         log("stopped")
 

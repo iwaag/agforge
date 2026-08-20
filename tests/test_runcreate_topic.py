@@ -321,3 +321,29 @@ def test_dispatch_routes_by_prefix(monkeypatch, topic, expected):
 
 def test_the_sweep_covers_both_prefixes():
     assert zulip_listener.SWEEP_PREFIXES == ("runcreate-", "create-")
+
+
+def test_own_channel_sweeps_every_topic_but_other_channels_keep_prefixes(monkeypatch):
+    monkeypatch.setattr(zulip_listener, "instance_name", lambda: "agforge-agstudio1")
+    assert zulip_listener.topic_filter("agforge-agstudio1", "a plain question")
+    assert zulip_listener.topic_filter("general", "create-a-request")
+    assert not zulip_listener.topic_filter("general", "a plain question")
+
+
+def test_dispatch_answers_a_plain_own_channel_question(monkeypatch):
+    sent = []
+
+    class EntranceClient:
+        def send_to_channel(self, channel, topic, text):
+            sent.append((channel, topic, text))
+
+    monkeypatch.setattr(zulip_listener, "instance_name", lambda: "agforge-agstudio1")
+    zulip_listener.dispatch(EntranceClient(), "agforge-agstudio1", "question")
+    assert sent == [
+        (
+            "agforge-agstudio1",
+            "question",
+            "This is agforge-agstudio1, an asset-generation agent. "
+            "To request an asset, open a `create-…` topic in `agforge-agstudio1`.",
+        )
+    ]
