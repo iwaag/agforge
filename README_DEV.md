@@ -111,15 +111,22 @@ turn2/turn3).
 
 `agforge-agstudio1` is this instance's Single Entrance: every unresolved
 topic in that Zulip channel reaches the listener. Open an `assetplan-…`
-topic to start the existing asset workflow; a plain topic receives the fixed p1
-directions. The committed `params/intro.md` is posted with
-`uv run python -m agforge.intro` to `#agents`, topic
-`intro-agforge-agstudio1`, with a date and Git revision stamp.
+topic to plan an asset, and post in an `assetrun-…` topic to execute one
+planned Work; a plain topic receives the fixed p1 directions. The committed
+`params/intro.md` is posted with `uv run python -m agforge.intro` to
+`#agents`, topic `intro-agforge-agstudio1`, with a date and Git revision
+stamp.
 
-The listener keeps the earlier compatibility routes for now: `assetplan-` /
-`assetrun-` in other subscribed channels and DMs to the bot. A DM becomes
-one `agent_run.run_request()` using the visible conversation as a
-speaker-labelled transcript; `service/GUIDE.md` documents that format and the
+The prefixes say plan-versus-execute on purpose (`agent_standardize` p3,
+2026-08-21): `assetplan-` was `create-` and `assetrun-` was `runcreate-`.
+The old names are gone with no compatibility shim — an old-prefix topic
+matches no sweep at all.
+
+Two routes from before the own-channel entrance are still live: `assetplan-`
+/ `assetrun-` topics in *other* subscribed channels, and DMs to the bot.
+(Those are inherited entrances, not old-vocabulary fallbacks — there are
+none of the latter.) A DM becomes one `agent_run.run_request()` using the
+visible conversation as a speaker-labelled transcript; `service/GUIDE.md` documents that format and the
 `reply` field the run is asked to write.
 
 ## Generation parameters
