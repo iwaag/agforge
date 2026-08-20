@@ -49,13 +49,13 @@ def test_eligible_works_orders_by_creation_then_serial():
 
 
 def test_the_origin_is_read_off_the_external_id():
-    work = works.Work("p", "i", "n", "d", "agforge", "FreeForge/create-x")
-    assert work.origin() == ("FreeForge", "create-x")
+    work = works.Work("p", "i", "n", "d", "agforge", "FreeForge/assetplan-x")
+    assert work.origin() == ("FreeForge", "assetplan-x")
 
 
 def test_a_topic_containing_slashes_survives_the_split():
-    work = works.Work("p", "i", "n", "d", "agforge", "pj-demo/create-a/b")
-    assert work.origin() == ("pj-demo", "create-a/b")
+    work = works.Work("p", "i", "n", "d", "agforge", "pj-demo/assetplan-a/b")
+    assert work.origin() == ("pj-demo", "assetplan-a/b")
 
 
 def test_a_foreign_or_hand_made_work_has_no_origin():
@@ -87,13 +87,13 @@ def test_next_work_picks_the_oldest_across_marked_projects(monkeypatch):
     issues = {
         "p1": [
             {"id": "i1", "name": "Later", "labels": ["p1-forge"], "state": "todo",
-             "created_at": "2026-01-05", "external_id": "FreeForge/create-later",
+             "created_at": "2026-01-05", "external_id": "FreeForge/assetplan-later",
              "external_source": "agforge",
              "description_html": "<p>second</p>"},
         ],
         "p2": [
             {"id": "i2", "name": "Older", "labels": ["p2-forge"], "state": "todo",
-             "created_at": "2026-01-01", "external_id": "pj-demo/create-old",
+             "created_at": "2026-01-01", "external_id": "pj-demo/assetplan-old",
              "external_source": "agforge",
              "description_html": "<p>first</p>"},
         ],
@@ -102,7 +102,7 @@ def test_next_work_picks_the_oldest_across_marked_projects(monkeypatch):
     chosen = works.next_work()
     assert (chosen.project_id, chosen.issue_id, chosen.name) == ("p2", "i2", "Older")
     assert chosen.description == "first"
-    assert chosen.origin() == ("pj-demo", "create-old")
+    assert chosen.origin() == ("pj-demo", "assetplan-old")
 
 
 def test_a_project_without_the_label_is_skipped(monkeypatch):

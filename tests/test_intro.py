@@ -5,11 +5,11 @@ from agforge import intro
 
 def test_intro_text_is_fixed_markdown_with_a_freshness_stamp(monkeypatch, tmp_path):
     source = tmp_path / "intro.md"
-    source.write_text("# agforge\n\nOpen a `create-…` topic.\n", encoding="utf-8")
+    source.write_text("# agforge\n\nOpen an `assetplan-…` topic.\n", encoding="utf-8")
     monkeypatch.setattr(intro, "INTRO_PATH", source)
 
     assert intro.intro_text(date(2026, 8, 20), "3939f26") == (
-        "# agforge\n\nOpen a `create-…` topic.\n\n---\n"
+        "# agforge\n\nOpen an `assetplan-…` topic.\n\n---\n"
         "Posted: 2026-08-20\nRevision: `3939f26`\n"
     )
 

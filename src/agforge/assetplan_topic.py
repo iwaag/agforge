@@ -1,4 +1,4 @@
-"""Serve one `create-` topic: front agent, then generator agent.
+"""Serve one `assetplan-` topic: front agent, then generator agent.
 
 The discipline — ack, generation workspace, chatlog, always post back, and
 re-serve when a human spoke during the run — is `agag.topics.serve_topic`,
@@ -57,7 +57,7 @@ TOOLS_DIR = "tools"
 PLAN_FILE = "plan.md"
 IDEA_FILE = "idea.md"
 # The generator's own signal that it answered with a question instead of a
-# plan (`create_generator/guide_plan.md`). A question posted into a topic
+# plan (`assetplan_generator/guide_plan.md`). A question posted into a topic
 # nobody is watching is a conversation that stalls, so the reply gets a Zulip
 # mention of whoever spoke last.
 QUESTION_FLAG = "question.flag"
@@ -102,7 +102,7 @@ def mention(name: str) -> str:
 
 
 class ListenerError(RuntimeError):
-    """One create-topic workflow could not complete."""
+    """One assetplan-topic workflow could not complete."""
 
 
 def topic_workspace(channel: str, topic: str) -> Path:
@@ -124,7 +124,7 @@ def is_ack(content: str) -> bool:
 
 def front_prompt(bot_name: str) -> str:
     return prompt_with_guide(
-        [chatlog_placement(bot_name)], guide("create_front", "guide.md")
+        [chatlog_placement(bot_name)], guide("assetplan_front", "guide.md")
     )
 
 
@@ -142,7 +142,10 @@ def run_front(prompt: str, cwd: Path) -> str:
 
 def run_generator(cwd: Path) -> str:
     return _run(
-        "generator", guide("create_generator", "guide_plan.md"), cwd, GENERATOR_TIMEOUT_SECONDS
+        "generator",
+        guide("assetplan_generator", "guide_plan.md"),
+        cwd,
+        GENERATOR_TIMEOUT_SECONDS,
     )
 
 

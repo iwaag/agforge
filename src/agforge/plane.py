@@ -2,7 +2,7 @@
 
 The client itself is `agag.plane`, shared with agautolab. What lives here is
 only agforge's policy on top of it: which project a channel routes to, and
-the two markers that make a Work executable by agforge's own `runcreate-`
+the two markers that make a Work executable by agforge's own `assetrun-`
 flow while staying invisible to agautolab's.
 
 Every Work registered here carries the `FORGEAUTO` label, and the fallback
@@ -54,7 +54,7 @@ AUTO_MARKER = "[AUTO]"
 FORGE_LABEL = "FORGEAUTO"
 
 # The third marker: which toolsets this Work was planned with, carried as the
-# description's last line so `runcreate` can rebuild the same `tools/`. It
+# description's last line so `assetrun` can rebuild the same `tools/`. It
 # rides in the description rather than a comment because `next_work` already
 # reads the description, and comments would need a new list API in agag.plane.
 TOOLS_MARKER = "[TOOLS]"
@@ -218,7 +218,7 @@ def register_plan(channel: str, topic: str, plan: Path, tools=()) -> str:
             state=starting_state_id(config, project_id),
             external_source=EXTERNAL_SOURCE,
             external_id=key,
-            # The label is what `runcreate-` work selection picks up — and
+            # The label is what `assetrun-` work selection picks up — and
             # what autolab's `next_work` (which wants `AUTO`) passes over.
             labels=[ensure_label(config, project_id)],
         )

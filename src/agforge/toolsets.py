@@ -6,7 +6,7 @@ its own spelling of the rules:
 
 - `agforge toolsets --list` — what the front sees.
 - the create flow — the front's `toolsets.csv` becomes `generator/tools/`.
-- the runcreate flow — a Work's `[TOOLS]` footer becomes the same `tools/`.
+- the assetrun flow — a Work's `[TOOLS]` footer becomes the same `tools/`.
 
 Name resolution is deliberately lenient. The name may arrive with or without
 its `.md` extension and with the `--list` description tail still attached,

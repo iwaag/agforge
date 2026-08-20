@@ -36,9 +36,9 @@ workspace root).
     takes minutes.
 - `agent/toolsets/toolset-*.md` — one document per toolset, opening with a
   `# Description` section. They are the generator's tool vocabulary, and the
-  unit the whole create flow moves around: the front's `toolsets.csv`
+  unit the whole assetplan flow moves around: the front's `toolsets.csv`
   becomes `generator/tools/`, the resulting Work carries a
-  `[TOOLS] toolset-image, …` footer on its description, and `runcreate`
+  `[TOOLS] toolset-image, …` footer on its description, and `assetrun`
   rebuilds the same `tools/` from that footer (no footer — hand-made Work —
   means the whole library). `src/agforge/toolsets.py` is the only reader.
 - `agent/guides/` — what each role is told, per flow.
@@ -49,7 +49,7 @@ workspace root).
 - `service/serve.sh` — the request service on :8092
   (`AGFORGE_SERVICE_PORT`). Log: `.local/out/service.log`.
 - `service/listen.sh` — the Zulip entrance: long-polls every unresolved topic
-  in this instance's own channel, while retaining `create-` / `runcreate-`
+  in this instance's own channel, while retaining `assetplan-` / `assetrun-`
   topics in other subscribed channels and the existing DM route. Credentials
   are in `.local/zulip.env`, and the log is `.local/out/zulip-listener.log`.
   Set `AGFORGE_ZULIP_LOG_ONLY=1` to watch without answering.
@@ -110,14 +110,14 @@ turn2/turn3).
 ## Chat contract
 
 `agforge-agstudio1` is this instance's Single Entrance: every unresolved
-topic in that Zulip channel reaches the listener. Open a `create-…` topic to
-start the existing asset workflow; a plain topic receives the fixed p1
+topic in that Zulip channel reaches the listener. Open an `assetplan-…`
+topic to start the existing asset workflow; a plain topic receives the fixed p1
 directions. The committed `params/intro.md` is posted with
 `uv run python -m agforge.intro` to `#agents`, topic
 `intro-agforge-agstudio1`, with a date and Git revision stamp.
 
-The listener keeps the earlier compatibility routes for now: `create-` /
-`runcreate-` in other subscribed channels and DMs to the bot. A DM becomes
+The listener keeps the earlier compatibility routes for now: `assetplan-` /
+`assetrun-` in other subscribed channels and DMs to the bot. A DM becomes
 one `agent_run.run_request()` using the visible conversation as a
 speaker-labelled transcript; `service/GUIDE.md` documents that format and the
 `reply` field the run is asked to write.

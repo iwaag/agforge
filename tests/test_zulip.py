@@ -47,7 +47,7 @@ def test_dm_partners_excludes_the_bot():
     assert zulip.dm_partners(group, BOT_ID) == [HUMAN_ID, 9]
 
 
-def channel_message(sender_id, content, channel="FreeForge", topic="create-20260812-x"):
+def channel_message(sender_id, content, channel="FreeForge", topic="assetplan-20260812-x"):
     return {
         "id": 2,
         "type": "stream",
@@ -79,11 +79,11 @@ def test_react_topic_acks_synchronously_before_the_run(monkeypatch):
         zulip_chat, "_spawn_run",
         lambda history_fn, send_fn, label, self_id, log, ack: spawned.append((label, ack)),
     )
-    zulip_chat.react_topic(Client(), "FreeForge", "create-20260812-x")
+    zulip_chat.react_topic(Client(), "FreeForge", "assetplan-20260812-x")
 
-    assert sent == [("FreeForge", "create-20260812-x", zulip_chat.SWEEP_ACK)]
+    assert sent == [("FreeForge", "assetplan-20260812-x", zulip_chat.SWEEP_ACK)]
     # The run itself skips its own "on it" ack — the common ack already spoke.
-    assert spawned == [("channel='FreeForge' topic='create-20260812-x'", False)]
+    assert spawned == [("channel='FreeForge' topic='assetplan-20260812-x'", False)]
 
 
 def test_conversation_answers_a_channel_message_in_its_topic():
@@ -91,7 +91,7 @@ def test_conversation_answers_a_channel_message_in_its_topic():
 
     class Client:
         def topic_history(self, channel, topic, num_before):
-            assert (channel, topic) == ("FreeForge", "create-20260812-x")
+            assert (channel, topic) == ("FreeForge", "assetplan-20260812-x")
             return [channel_message(HUMAN_ID, "make a bird")]
 
         def send_to_channel(self, channel, topic, text):
@@ -101,8 +101,8 @@ def test_conversation_answers_a_channel_message_in_its_topic():
     history_fn, send_fn, label = place
     assert [m["content"] for m in history_fn(50)] == ["make a bird"]
     send_fn("here you go")
-    assert sent == [("FreeForge", "create-20260812-x", "here you go")]
-    assert "create-20260812-x" in label
+    assert sent == [("FreeForge", "assetplan-20260812-x", "here you go")]
+    assert "assetplan-20260812-x" in label
 
 
 def test_conversation_falls_back_to_the_dm_narrow():

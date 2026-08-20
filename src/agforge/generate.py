@@ -14,7 +14,7 @@ import requests
 
 DEFAULT_TTL_MINUTES = 60
 
-# `upload_and_presign` serves more than images now (the runcreate flow ships
+# `upload_and_presign` serves more than images now (the assetrun flow ships
 # result zips through it); anything unknown is an octet-stream.
 CONTENT_TYPES = {
     ".jpg": "image/jpeg",

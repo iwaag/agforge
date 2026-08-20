@@ -1,6 +1,6 @@
-"""Execute one Work, triggered by any non-bot post in a `runcreate-` topic.
+"""Execute one Work, triggered by any non-bot post in an `assetrun-` topic.
 
-autolab's `handle_run` discipline, on agforge's vocabulary: a `runcreate-`
+autolab's `handle_run` discipline, on agforge's vocabulary: an `assetrun-`
 topic is a button, not a conversation. The chatlog is never read — whatever
 the topic gets, one eligible Work is chosen from Plane (`works.next_work`),
 executed by the generator in the Work's own persistent workspace, and the
@@ -41,14 +41,14 @@ RECORDS_ROOT = AGFORGE_ROOT / ".local" / "agent"
 
 TOOLS_DIR = "tools"
 
-# The generator's own verdict on its run, from `runcreate_generator/guide.md`.
+# The generator's own verdict on its run, from `assetrun_generator/guide.md`.
 # The exit code stays the first-class failure signal; this is the agent
 # saying so itself when the harness saw nothing wrong.
 FAILURE_FLAG = "failure.flag"
 
 # Real work, not a planning pass: autolab's work run uses 1200 s and the
-# create-flow generator 900 s; this sits at the top of that range.
-RUNCREATE_TIMEOUT_SECONDS = 1200
+# assetplan-flow generator 900 s; this sits at the top of that range.
+ASSETRUN_TIMEOUT_SECONDS = 1200
 
 NO_WORK_REPLY = "no work"
 FAILED_PREFIX = "the run reported failure; what it produced follows"
@@ -69,7 +69,7 @@ __all__ = [
     "S3_KEY_MARKER",
     "ListenerError",
     "deliver_to_origin",
-    "handle_runcreate",
+    "handle_assetrun",
     "prepare_workspace",
     "result_files",
     "run_generator",
@@ -81,7 +81,7 @@ __all__ = [
 
 
 class ListenerError(RuntimeError):
-    """One runcreate-topic workflow could not complete."""
+    """One assetrun-topic workflow could not complete."""
 
 
 def workspace_dir(issue_id: str) -> Path:
@@ -119,12 +119,12 @@ def prepare_workspace(work: Work) -> Path:
 
 def run_generator(workspace: Path) -> str:
     """One generator run in the Work's workspace, with its record."""
-    record = next_record_path(RECORDS_ROOT / "runcreate")
+    record = next_record_path(RECORDS_ROOT / "assetrun")
     output, _, exit_code = run_role(
         "generator",
-        shared_guide(GUIDES, "runcreate_generator", "guide.md"),
+        shared_guide(GUIDES, "assetrun_generator", "guide.md"),
         cwd=workspace,
-        timeout=RUNCREATE_TIMEOUT_SECONDS,
+        timeout=ASSETRUN_TIMEOUT_SECONDS,
         record=record,
     )
     if exit_code != 0:
@@ -132,9 +132,9 @@ def run_generator(workspace: Path) -> str:
     return output.strip()
 
 
-def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
+def handle_assetrun(client: ZulipClient, channel: str, topic: str) -> None:
     """Choose, execute, deliver, and always answer the topic."""
-    log(f"runcreate topic {channel!r}/{topic!r}")
+    log(f"assetrun topic {channel!r}/{topic!r}")
     topic_write(topic, SWEEP_ACK, channel=channel, client=client)
 
     sections: list[str] = []
@@ -198,7 +198,7 @@ def handle_runcreate(client: ZulipClient, channel: str, topic: str) -> None:
             f"Done {'yes' if completed else 'no'}"
         )
     except Exception as error:  # noqa: BLE001 - the topic is the error channel
-        log(f"runcreate topic workflow failed during {step}: {error!r}")
+        log(f"assetrun topic workflow failed during {step}: {error!r}")
         sections.append(f"failed during {step}: {error}")
 
     topic_write(topic, "\n\n".join(section for section in sections if section),
@@ -239,10 +239,10 @@ def s3_key_footer(key: str) -> str:
 
 def deliver_to_origin(client: ZulipClient, work: Work, delivery: str) -> str:
     """Post the delivery to the topic the request came from, and say what
-    happened either way — the runcreate summary must survive everything,
+    happened either way — the assetrun summary must survive everything,
     including a dead origin channel.
 
-    The origin `create-` topic may already be resolved (`✔`); posting under
+    The origin `assetplan-` topic may already be resolved (`✔`); posting under
     the plain name still lands (Zulip treats it as that topic's thread), and
     this bot being last poster there cannot re-trigger the create sweep.
     """

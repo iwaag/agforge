@@ -1,9 +1,9 @@
-"""agforge's chat entrance: pull `create-*`/`runcreate-*` topics, long-poll DMs.
+"""agforge's chat entrance: pull `assetplan-*`/`assetrun-*` topics, poll DMs.
 
 The mechanics live in `agag.zulip`, shared with the other agents' listeners.
-Swept *topics* are routed by `dispatch`: `create-` topics go through
-`create_topic.handle_topic` — the front/generator pair over a generation
-workspace — and `runcreate-` topics through `runcreate_topic.handle_runcreate`
+Swept *topics* are routed by `dispatch`: `assetplan-` topics go through
+`assetplan_topic.handle_topic` — the front/generator pair over a generation
+workspace — and `assetrun-` topics through `assetrun_topic.handle_assetrun`
 — one Work execution per trigger. The pull loop (`sweep_serve`) finds every
 unresolved matching topic in a subscribed channel whose last poster is not
 this bot, again on every startup and queue re-registration, so a post that
@@ -27,11 +27,11 @@ AGFORGE_ROOT = Path(__file__).resolve().parents[2]
 ZULIP_ENV = AGFORGE_ROOT / ".local" / "zulip.env"
 
 # Request topics per the zulip_channel_topic workflow. A resolved topic is
-# renamed "✔ create-…" and stops matching on its own.
-REQUEST_TOPIC_PREFIX = "create-"
+# renamed "✔ assetplan-…" and stops matching on its own.
+ASSETPLAN_TOPIC_PREFIX = "assetplan-"
 # Execution-trigger topics: any non-bot post fires one Work execution.
-RUNCREATE_TOPIC_PREFIX = "runcreate-"
-SWEEP_PREFIXES = (RUNCREATE_TOPIC_PREFIX, REQUEST_TOPIC_PREFIX)
+ASSETRUN_TOPIC_PREFIX = "assetrun-"
+SWEEP_PREFIXES = (ASSETRUN_TOPIC_PREFIX, ASSETPLAN_TOPIC_PREFIX)
 
 __all__ = [
     "ZULIP_ENV", "dispatch", "entrance_reply", "handle_message", "log", "main",
@@ -49,25 +49,24 @@ def entrance_reply() -> str:
     name = instance_name()
     return (
         f"This is {name}, an asset-generation agent. "
-        f"To request an asset, open a `create-…` topic in `{name}`."
+        f"To request an asset, open an `assetplan-…` topic in `{name}`."
     )
 
 
 def dispatch(client: ZulipClient, channel: str, topic: str) -> None:
     """Route one swept topic to its handler.
 
-    `runcreate-` cannot collide with the `create-` prefix match (different
-    first letter), but it is routed first anyway so the order is a decision,
-    not an accident. Both work in any subscribed channel: a `runcreate-`
+    The two prefixes share no stem, so neither can shadow the other and the
+    order here is free. Both work in any subscribed channel: an `assetrun-`
     topic carries no project — the project comes from the chosen Work.
     """
-    from .create_topic import handle_topic
-    from .runcreate_topic import handle_runcreate
+    from .assetplan_topic import handle_topic
+    from .assetrun_topic import handle_assetrun
 
-    if topic.startswith(RUNCREATE_TOPIC_PREFIX):
-        handle_runcreate(client, channel, topic)
+    if topic.startswith(ASSETRUN_TOPIC_PREFIX):
+        handle_assetrun(client, channel, topic)
         return
-    if topic.startswith(REQUEST_TOPIC_PREFIX):
+    if topic.startswith(ASSETPLAN_TOPIC_PREFIX):
         handle_topic(client, channel, topic)
         return
     client.send_to_channel(channel, topic, entrance_reply())

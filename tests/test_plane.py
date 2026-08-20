@@ -3,7 +3,7 @@
 The client itself (`agag.plane`) is tested in pyagag. What is pinned here is
 only agforge's own decisions — which project a channel routes to, and the
 `FORGEAUTO` label / `[AUTO]` marker pair that makes a Work agforge's own
-`runcreate-` flow's to execute while staying out of agautolab's `next_work`
+`assetrun-` flow's to execute while staying out of agautolab's `next_work`
 (which wants the `AUTO` label). This reverses p1's "no labels, no `[AUTO]`"
 guards, on purpose (modernize p2).
 """
@@ -84,26 +84,26 @@ def plan_file(tmp_path, text="# Draw the bird\n\nOne 64x64 PNG.\n"):
 
 
 def test_a_registered_work_carries_the_forgeauto_label(monkeypatch, tmp_path):
-    """The label is what `runcreate-` work selection picks up — and, being
+    """The label is what `assetrun-` work selection picks up — and, being
     `FORGEAUTO` rather than `AUTO`, what autolab's `next_work` passes over."""
     fake = Plane()
     wire(monkeypatch, fake)
-    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
+    plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path))
     body = fake.bodies("POST", "/issues/")[0]
     assert body["labels"] == [fake.labels[0]["id"]]
     assert fake.labels[0]["name"] == "FORGEAUTO"
-    assert (body["external_source"], body["external_id"]) == ("agforge", "FreeForge/create-x")
+    assert (body["external_source"], body["external_id"]) == ("agforge", "FreeForge/assetplan-x")
 
 
 def test_a_registered_work_carries_its_toolsets_as_the_tools_footer(
     monkeypatch, tmp_path
 ):
-    """The third marker: `runcreate` rebuilds `tools/` from this line, so it
+    """The third marker: `assetrun` rebuilds `tools/` from this line, so it
     rides in the description, which `next_work` already reads."""
     fake = Plane()
     wire(monkeypatch, fake)
     plane.register_plan(
-        "FreeForge", "create-x", plan_file(tmp_path), ["toolset-image", "toolset-video"]
+        "FreeForge", "assetplan-x", plan_file(tmp_path), ["toolset-image", "toolset-video"]
     )
     body = fake.bodies("POST", "/issues/")[0]
     assert body["description_html"].endswith("[TOOLS] toolset-image, toolset-video</p>")
@@ -112,7 +112,7 @@ def test_a_registered_work_carries_its_toolsets_as_the_tools_footer(
 def test_no_toolsets_means_no_footer_at_all(monkeypatch, tmp_path):
     fake = Plane()
     wire(monkeypatch, fake)
-    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path), [])
+    plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path), [])
     assert plane.TOOLS_MARKER not in fake.bodies("POST", "/issues/")[0]["description_html"]
 
 
@@ -132,7 +132,7 @@ def test_a_description_without_the_footer_answers_none_not_empty():
 def test_a_created_project_carries_the_auto_marker(monkeypatch, tmp_path):
     fake = Plane(projects=[])
     wire(monkeypatch, fake)
-    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
+    plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path))
     created = fake.bodies("POST", "/projects/")[0]
     assert created["name"] == "FreeForge"
     assert created["description"].startswith("[AUTO]")
@@ -146,7 +146,7 @@ def test_an_unmarked_freeforge_description_is_reconciled(monkeypatch, tmp_path):
         "description": "agforge request records: FreeForge",
     }])
     wire(monkeypatch, fake)
-    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
+    plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path))
     patched = [b for m, url, b in fake.calls if m == "PATCH" and "/projects/" in url]
     assert patched == [{"description": plane.FALLBACK_DESCRIPTION}]
 
@@ -154,7 +154,7 @@ def test_an_unmarked_freeforge_description_is_reconciled(monkeypatch, tmp_path):
 def test_a_marked_freeforge_description_is_left_alone(monkeypatch, tmp_path):
     fake = Plane()
     wire(monkeypatch, fake)
-    plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
+    plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path))
     assert not [b for m, url, b in fake.calls if m == "PATCH" and "/projects/" in url]
 
 
@@ -180,16 +180,16 @@ def test_ensure_label_reuses_an_existing_label_case_insensitively(monkeypatch):
 def test_a_project_channel_routes_to_its_own_project(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE, DEMO])
     wire(monkeypatch, fake)
-    line = plane.register_plan("pj-demo-project", "create-x", plan_file(tmp_path))
+    line = plane.register_plan("pj-demo-project", "assetplan-x", plan_file(tmp_path))
     assert "in Demo Project" in line
     assert "instead" not in line
-    assert fake.bodies("POST", "/issues/")[0]["external_id"] == "pj-demo-project/create-x"
+    assert fake.bodies("POST", "/issues/")[0]["external_id"] == "pj-demo-project/assetplan-x"
 
 
 def test_a_missing_project_falls_back_to_freeforge_and_says_so(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE])
     wire(monkeypatch, fake)
-    line = plane.register_plan("pj-absent", "create-x", plan_file(tmp_path))
+    line = plane.register_plan("pj-absent", "assetplan-x", plan_file(tmp_path))
     # A fallback is a routing fact reported on the topic, not a failure.
     assert "no Plane project named 'absent'" in line
     assert "registering in FreeForge instead" in line
@@ -199,14 +199,14 @@ def test_a_missing_project_falls_back_to_freeforge_and_says_so(monkeypatch, tmp_
 def test_a_malformed_project_channel_falls_back_too(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE])
     wire(monkeypatch, fake)
-    line = plane.register_plan("pj-Bad_Name", "create-x", plan_file(tmp_path))
+    line = plane.register_plan("pj-Bad_Name", "assetplan-x", plan_file(tmp_path))
     assert "does not carry a valid project name" in line
 
 
 def test_a_non_project_channel_routes_to_freeforge(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE, DEMO])
     wire(monkeypatch, fake)
-    assert plane.register_plan("FreeForge", "create-x", plan_file(tmp_path)) == (
+    assert plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path)) == (
         'created FF-7 "Draw the bird" in FreeForge'
     )
 
@@ -214,7 +214,7 @@ def test_a_non_project_channel_routes_to_freeforge(monkeypatch, tmp_path):
 def test_freeforge_is_created_on_first_use(monkeypatch, tmp_path):
     fake = Plane(projects=[])
     wire(monkeypatch, fake)
-    plane.register_plan("random-channel", "create-x", plan_file(tmp_path))
+    plane.register_plan("random-channel", "assetplan-x", plan_file(tmp_path))
     assert [row["name"] for row in fake.bodies("POST", "/projects/")] == ["FreeForge"]
 
 
@@ -225,9 +225,9 @@ def test_serving_the_same_topic_twice_updates_one_work(monkeypatch, tmp_path):
     """The external key is the guard; N climbing must not fork the Work."""
     fake = Plane()
     wire(monkeypatch, fake)
-    first = plane.register_plan("FreeForge", "create-x", plan_file(tmp_path))
+    first = plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path))
     second = plane.register_plan(
-        "FreeForge", "create-x", plan_file(tmp_path, "# Draw a bluer bird\n\nAgain.\n")
+        "FreeForge", "assetplan-x", plan_file(tmp_path, "# Draw a bluer bird\n\nAgain.\n")
     )
     assert first.startswith("created ")
     assert second.startswith("updated ")
@@ -236,7 +236,7 @@ def test_serving_the_same_topic_twice_updates_one_work(monkeypatch, tmp_path):
 
 
 def test_the_external_key_is_the_channel_and_topic():
-    assert plane.external_id("pj-x", "create-y") == "pj-x/create-y"
+    assert plane.external_id("pj-x", "assetplan-y") == "pj-x/assetplan-y"
 
 
 def test_credentials_come_from_the_shared_pj_agdev_file():

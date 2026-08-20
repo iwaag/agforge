@@ -38,7 +38,7 @@ NOISE_CLASS = "RandomNoise"
 # ComfyUI's own seed range.
 MAX_SEED = 2**63 - 1
 
-# Generation takes minutes. This budget sits inside the runcreate
+# Generation takes minutes. This budget sits inside the assetrun
 # generator's 1200 s run budget, with room for the upload after it.
 POLL_INTERVAL_SECONDS = 5
 POLL_TIMEOUT_SECONDS = 600

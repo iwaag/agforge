@@ -1,4 +1,4 @@
-"""Which Work agforge's `runcreate-` flow executes next, and reporting back.
+"""Which Work agforge's `assetrun-` flow executes next, and reporting back.
 
 Ported locally from agautolab's `mission.py` (`eligible_works`, `next_work`,
 `report_work`), the same rhythm as p1: local first, pyagag sharing is Step 6's
@@ -39,7 +39,7 @@ __all__ = ["Work", "eligible_works", "next_work", "report_work", "sub_work_seria
 
 @dataclass(frozen=True)
 class Work:
-    """One chosen Work, with everything the runcreate flow needs of it."""
+    """One chosen Work, with everything the assetrun flow needs of it."""
 
     project_id: str
     issue_id: str
