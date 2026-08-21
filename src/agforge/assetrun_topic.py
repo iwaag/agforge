@@ -47,10 +47,10 @@ from agag.topics import (
     chatlog_path,
     format_chatlog,
     guide as shared_guide,
-    handoff_mention,
     next_record_path,
     serve_topic,
 )
+from agag.selfnote import is_selfnote
 from agag.zulip import ZulipClient, log, topic_write
 
 from . import generate, toolsets
@@ -105,6 +105,7 @@ __all__ = [
     "UNANCHORED_REPLY",
     "ListenerError",
     "deliver_to_origin",
+    "trigger_mention",
     "handle_assetrun",
     "prepare_workspace",
     "result_files",
@@ -318,13 +319,37 @@ def origin_of(context, work: Work) -> tuple[str, str] | None:
     return home.as_pair() if home is not None else work.origin()
 
 
+def trigger_mention(context) -> str:
+    """`@**<name>**` for whoever triggered *this* run.
+
+    Read off `context.history` — the conversation as it stood when the run
+    was served — and not by re-reading the topic afterwards, which is what
+    `handoff_mention` does. A generation takes minutes, and anybody may post
+    into the run topic while it lasts: `agent_standardize` p9 watched a
+    supervisor ask "how is it going?" mid-run and receive the delivery
+    intended for the agent that had actually triggered it, which was then
+    never called back at all. The trigger is a fact about the past, so it is
+    read from the past.
+    """
+    for message in reversed(list(context.history)):
+        if message.get("sender_id") == context.self_id:
+            continue
+        if is_selfnote(message.get("content")):
+            continue
+        name = str(message.get("sender_full_name") or "").strip()
+        if name:
+            return f"@**{name}**"
+    return ""
+
+
 def deliver_to_origin(context, work: Work, delivery: str) -> str:
     """Post the delivery into the `assetplan-` topic, naming who triggered it.
 
     The trigger came from somewhere, and whoever made it is waiting in their
     own conversation, not in this one. Naming them is not courtesy: a
     participant of a topic is served only when a post names it, so this is
-    the thing that gives them their turn back.
+    the thing that gives them their turn back — which is exactly why it has
+    to be the *trigger* and not merely the last voice in the room.
 
     Said either way — the assetrun summary must survive everything, including
     a dead origin channel. The origin `assetplan-` topic may already be
@@ -335,9 +360,7 @@ def deliver_to_origin(context, work: Work, delivery: str) -> str:
     if origin is None:
         return f"no origin topic recorded; the result stays here:\n\n{delivery}"
     channel, topic = origin
-    trigger = handoff_mention(
-        context.client, context.channel, context.topic, context.self_id
-    )
+    trigger = trigger_mention(context)
     body = f"{trigger}\n\n{delivery}" if trigger else delivery
     try:
         topic_write(topic, body, channel=channel, client=context.client)

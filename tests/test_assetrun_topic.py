@@ -53,11 +53,18 @@ class Client:
     def __init__(self, calls=None, history=None):
         self.calls = [] if calls is None else calls
         self.history = anchored(message(id=3)) if history is None else history
+        #: A post that lands *after* the serving began — the run topic stays
+        #: open while a generation takes its minutes.
+        self.late_message = None
+        self.reads = 0
 
     def whoami(self):
         return {"user_id": BOT_ID, "full_name": "Forge"}
 
     def topic_history(self, channel, topic, num_before=50):
+        self.reads += 1
+        if self.late_message is not None and self.reads > 1:
+            return [*self.history, self.late_message]
         return self.history
 
 
@@ -189,6 +196,34 @@ def test_the_result_reaches_both_topics_and_only_one_names_the_trigger(
     assert posted[1][1].startswith("@**Developer**")
     assert "@**Developer**" not in posted[2][1]
     assert f"delivered to {CHANNEL}/{ORIGIN_TOPIC}" in posted[2][1]
+
+
+def test_the_delivery_names_the_trigger_not_whoever_looked_in_last(
+    monkeypatch, tmp_path
+):
+    """A generation takes minutes and the run topic stays open while it runs.
+
+    `agent_standardize` p9 watched a supervisor post "how is it going?" into a
+    run topic mid-generation and collect the delivery meant for the agent that
+    triggered it — which was then never called back, and the exchange stopped
+    there. The trigger is read from the history the run was served with.
+    """
+    calls = []
+    wire(monkeypatch, tmp_path, calls)
+    history = anchored(
+        message(id=3, content="go ahead", name="Developer", sender_id=HUMAN_ID),
+    )
+    client = Client(calls, history)
+    # Somebody else looks in *after* the serving began; the topic now ends
+    # with their post, but the run was not served with it.
+    client.late_message = message(
+        id=9, content="how is it going?", name="Front", sender_id=15
+    )
+    assetrun_topic.handle_assetrun(client, CHANNEL, TOPIC)
+
+    delivery = [c for c in calls if c[0] == "write" and c[1] == ORIGIN_TOPIC][0]
+    assert delivery[2].startswith("@**Developer**")
+    assert "@**Front**" not in delivery[2]
 
 
 def test_the_origin_comes_from_the_root_note_not_the_work_key(monkeypatch, tmp_path):
