@@ -206,6 +206,10 @@ def place_toolsets(front_dir: Path, generator_dir: Path) -> list[str]:
 def handle_generator(context, front_dir: Path, number: int) -> list[str]:
     """The `required_items.md` branch: build the generator workspace, run it.
 
+    Only called when `required_items.md` is there — the caller decides that,
+    because whether a generator run follows also decides which post hands the
+    requester their turn back.
+
     What the front *wrote* drives this, not what it said — its answer is
     relayed verbatim and never parsed, with no exception left.
 
@@ -217,11 +221,8 @@ def handle_generator(context, front_dir: Path, number: int) -> list[str]:
     requester twice.
     """
     channel, topic = context.channel, context.topic
-    required = front_dir / REQUIRED_ITEMS
-    if not required.is_file():
-        return []
     generator_dir = generation_dir(channel, topic, number, "generator")
-    shutil.copyfile(required, generator_dir / REQUIRED_ITEMS)
+    shutil.copyfile(front_dir / REQUIRED_ITEMS, generator_dir / REQUIRED_ITEMS)
     placed = place_toolsets(front_dir, generator_dir)
 
     answer = run_generator(generator_dir)
@@ -256,8 +257,20 @@ def serve(context) -> TopicResult:
 
     context.step = "front"
     answer = run_front(front_prompt(context.bot_name), front_dir)
+
+    if not (front_dir / REQUIRED_ITEMS).is_file():
+        # The front has a question, not a spec: no generator run follows, so
+        # this answer is the whole reply — and `serve_topic` is what prefixes
+        # a reply with the name of whoever is being answered. Posting it
+        # early instead (as every answer used to be posted) left the
+        # requester unnamed, and a requester who is not named is never
+        # brought back: `agent_standardize` p9 watched an exchange stop dead
+        # on exactly this, with forge asking a question nobody was told about.
+        return TopicResult([answer])
+
     # Posted on its own, before the generator run: the front's answer is the
-    # conversational reply, and the generator can take minutes.
+    # conversational reply, and the generator can take minutes. Here the
+    # registration that follows is the reply, and is what names the requester.
     context.post(answer)
 
     context.step = "generator"

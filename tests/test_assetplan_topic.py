@@ -112,16 +112,25 @@ def gen_dir(tmp_path, number, role):
 
 
 def test_front_only_path_acks_answers_and_stops(monkeypatch, tmp_path):
+    """A question is the whole reply, and a reply names who it answers.
+
+    Posting the front's answer early instead — which is what happens when a
+    generator run follows — left it unnamed, and a requester who is not named
+    is never brought back. `agent_standardize` p9 watched an exchange stop
+    dead on exactly that: forge asked a question and nobody was told.
+    """
     calls = []
     wire(monkeypatch, tmp_path, calls)
 
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
 
     assert [call[0] for call in calls] == [
-        "whoami", "write", "history", "front", "write", "history",
+        # the ack, the chatlog, the front run, the handoff lookup,
+        # the reply, the post-run re-check
+        "whoami", "write", "history", "front", "history", "write", "history",
     ]
     assert calls[1][1:] == (TOPIC, assetplan_topic.SWEEP_ACK)
-    assert calls[4][1:] == (TOPIC, "on it")
+    assert calls[5][1:] == (TOPIC, "@**Developer**\n\non it")
     # The chatlog lands in this generation's front workspace.
     assert (gen_dir(tmp_path, 1, "front") / "chatlog.md").read_text() == (
         "[Developer] make me a bird\n"
