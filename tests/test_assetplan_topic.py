@@ -50,6 +50,11 @@ class Client:
         return self.history
 
 
+def written(calls):
+    """Just the message bodies, in the order they were posted."""
+    return [call[2] for call in calls if call[0] == "write"]
+
+
 def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
          writes_required=False, writes=(), toolsets_csv=None):
     monkeypatch.setattr(assetplan_topic, "TOPICS_ROOT", tmp_path / "topics")
@@ -150,14 +155,17 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
 
     generator = gen_dir(tmp_path, 1, "generator")
     assert [call[0] for call in calls] == [
-        "whoami", "write", "history", "front", "write", "generator", "plan", "write",
-        "history",
+        "whoami", "write", "history", "front", "write", "generator", "plan",
+        # the handoff lookup, the reply, then the post-run re-check
+        "history", "write", "history",
     ]
     assert (generator / "required_items.md").read_text() == "one bird, blue"
     assert [path.name for path in (generator / "tools").iterdir()] == ["toolset-image.md"]
     assert calls[5][1] == generator
     # plan.md is registered, idea.md is relayed verbatim, then the answer.
-    assert calls[-2][2] == "registered PA-1\n\nbuy a GPU\n\nmade it"
+    assert written(calls)[-1] == (
+        "@**Developer**\n\nregistered PA-1\n\nbuy a GPU\n\nmade it"
+    )
 
 
 def test_the_front_answer_is_posted_before_the_generator_runs(monkeypatch, tmp_path):
@@ -176,7 +184,7 @@ def test_a_plan_alone_still_reports_and_answers(monkeypatch, tmp_path):
          writes=(("plan.md", "# Bird\n\nDraw it."),))
     monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: "registered PA-1")
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
-    assert calls[-2][2] == "registered PA-1\n\nmade it"
+    assert written(calls)[-1] == "@**Developer**\n\nregistered PA-1\n\nmade it"
 
 
 # --- (b2) toolsets.csv → tools/ --------------------------------------------
@@ -211,15 +219,16 @@ def test_no_csv_leaves_an_empty_tools_directory(monkeypatch, tmp_path):
     assert any(call[0] == "generator" for call in calls)
 
 
-# --- (b3) question.flag → a mention of whoever asked -----------------------
+# --- (b3) every reply names whoever is being answered ---------------------
 
 
-def test_question_flag_mentions_the_last_non_forge_poster(monkeypatch, tmp_path):
-    """A question posted into a topic nobody is watching is a conversation
-    that stalls. The flag alone decides this; the answer is never parsed."""
+def test_the_reply_names_the_last_non_forge_poster(monkeypatch, tmp_path):
+    """Being named is how the next run happens at all — a participant of a
+    conversation is served only when a post mentions it. So the shared
+    skeleton names them on every reply, question or not, and forge stopped
+    doing it itself behind `question.flag`."""
     calls = []
-    wire(monkeypatch, tmp_path, calls, writes_required=True,
-         writes=((assetplan_topic.QUESTION_FLAG, ""),), generator="what size?")
+    wire(monkeypatch, tmp_path, calls, writes_required=True, generator="what size?")
     history = [
         message(name="Developer", content="make me a bird"),
         message(sender_id=BOT_ID, name="Forge", content="on it", id=2),
@@ -227,13 +236,12 @@ def test_question_flag_mentions_the_last_non_forge_poster(monkeypatch, tmp_path)
 
     assetplan_topic.handle_topic(Client(calls, history=history), CHANNEL, TOPIC)
 
-    assert calls[-2][2] == "@**Developer**\n\nwhat size?"
+    assert written(calls)[-1] == "@**Developer**\n\nwhat size?"
 
 
 def test_the_mention_names_the_most_recent_asker(monkeypatch, tmp_path):
     calls = []
-    wire(monkeypatch, tmp_path, calls, writes_required=True,
-         writes=((assetplan_topic.QUESTION_FLAG, ""),), generator="what size?")
+    wire(monkeypatch, tmp_path, calls, writes_required=True, generator="what size?")
     history = [
         message(name="Developer", content="make me a bird"),
         message(sender_id=99, name="Autolab", content="64x64 please", id=2),
@@ -241,26 +249,16 @@ def test_the_mention_names_the_most_recent_asker(monkeypatch, tmp_path):
 
     assetplan_topic.handle_topic(Client(calls, history=history), CHANNEL, TOPIC)
 
-    assert calls[-2][2].startswith("@**Autolab**")
+    assert written(calls)[-1].startswith("@**Autolab**")
 
 
-def test_no_question_flag_means_no_mention(monkeypatch, tmp_path):
+def test_nobody_is_named_twice(monkeypatch, tmp_path):
+    """The old `question.flag` mention is gone, so a plain plan and a question
+    are named exactly once each."""
     calls = []
     wire(monkeypatch, tmp_path, calls, writes_required=True, generator="made it")
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
-    assert calls[-2][2] == "made it"
-    assert "@**" not in calls[-2][2]
-
-
-def test_last_other_sender_ignores_our_own_lines():
-    forge = {"sender_id": BOT_ID, "sender_full_name": "Forge"}
-    human = {"sender_id": HUMAN_ID, "sender_full_name": "Developer"}
-    assert assetplan_topic.last_other_sender([human, forge], BOT_ID) == "Developer"
-    assert assetplan_topic.last_other_sender([forge], BOT_ID) is None
-    assert assetplan_topic.last_other_sender([], BOT_ID) is None
-    # A message with no name is not a mention target; keep looking back.
-    nameless = {"sender_id": 42, "sender_full_name": ""}
-    assert assetplan_topic.last_other_sender([human, nameless], BOT_ID) == "Developer"
+    assert written(calls)[-1].count("@**") == 1
 
 
 # --- (c) an exception mid-way: `failed during …` is posted -----------------
@@ -275,7 +273,9 @@ def test_a_front_failure_names_its_step(monkeypatch, tmp_path):
 
     monkeypatch.setattr(assetplan_topic, "run_front", explode)
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
-    assert calls[-1][2] == "failed during front: claude_code timed out"
+    assert written(calls)[-1] == (
+        "@**Developer**\n\nfailed during front: claude_code timed out"
+    )
 
 
 def test_a_generator_failure_names_its_own_step(monkeypatch, tmp_path):
