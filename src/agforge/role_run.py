@@ -4,15 +4,24 @@ The same shape as agautolab's `role_run`: one function that goes from a role
 name to a finished run plus its `ag.agent-run.v1` record, and one table of
 per-role tool grants beside it. Everything a role may touch is decided here,
 not at the call site.
+
+Since `agent_standardize` p10 a run also gets the handover that lets it read
+and write the chat as this bot: `agentchat` on PATH and
+`AGENTCHAT_ZULIP_ENV` naming this instance's own credentials. autolab has had
+it since p6; forge needs it because its entrance answers about its own work
+by reading the board. The identity travels as a path — the secret stays in
+`.local/`.
 """
 
 from __future__ import annotations
 
 import os
 import shlex
+import sys
 from dataclasses import replace
 from pathlib import Path
 
+from agag import selfnote
 from agag.agent_config import ResolvedAgent, load_config, resolve_role
 from agag.harness import run_harness, write_run_record
 
@@ -22,6 +31,11 @@ AGENTS_LOCAL_CONFIG = AGFORGE_ROOT / ".local" / "agents.local.toml"
 ACE_STUDIO_ENV = AGFORGE_ROOT / ".local" / "ace-studio.env"
 LOCAL_BIN = AGFORGE_ROOT / ".local" / "bin"
 SCRIPTS_DIR = AGFORGE_ROOT / "scripts"
+#: This instance's Zulip credentials. Whatever a run says in the chat is
+#: attributable to the instance that said it.
+ZULIP_ENV = AGFORGE_ROOT / ".local" / "zulip.env"
+#: `agag.chat.ENV_VARIABLE`, spelled here so the run and the CLI agree.
+AGENTCHAT_ENV_VARIABLE = "AGENTCHAT_ZULIP_ENV"
 
 # The generator's grant: image/audio tooling, the shell verbs around it, and
 # file access inside its workspace. `agforge` and `generate.sh` are reached
@@ -52,7 +66,11 @@ ROLE_ALLOWED_TOOLS = {
     # The front reads and writes text — and runs `agforge toolsets --list`,
     # which its guide tells it to do. Without that grant it would sit on a
     # permission prompt until the timeout.
-    "front": "Read,Write,Edit,Glob,Grep,Bash(agforge:*)",
+    # `agentchat` is what the entrance serving of this role reads the board
+    # with — its own channel's topics, and `resolve` when it is told to close
+    # one out. The assetplan serving of the same role never reaches for it;
+    # its guide says nothing about the chat.
+    "front": "Read,Write,Edit,Glob,Grep,Bash(agforge:*),Bash(agentchat:*)",
     "generator": " ".join(CLAUDE_ALLOWED_TOOLS),
 }
 
@@ -95,6 +113,34 @@ def tool_environment(
     return environment
 
 
+def chat_environment(
+    bin_dir: Path | None = None,
+    zulip_env: Path | None = None,
+    home: tuple[str, str] | None = None,
+    base_path: str | None = None,
+) -> dict[str, str]:
+    """`agentchat` reachable by name, speaking as this instance.
+
+    The bin directory is the one holding the interpreter that runs the
+    listener — in a `uv` project that is `.venv/bin`, where the `agentchat`
+    console script is installed — so no deployment path is written down.
+
+    `home` is the conversation being served. `agentchat send` writes it into
+    whatever topic the run posts in as a root note, which is how an exchange
+    outlives the run that started it.
+    """
+    directory = Path(sys.executable).parent if bin_dir is None else bin_dir
+    environment = {AGENTCHAT_ENV_VARIABLE: str(zulip_env or ZULIP_ENV)}
+    if home is not None:
+        environment[selfnote.HOME_VARIABLE] = str(selfnote.Conversation(*home))
+    if directory.is_dir():
+        # Prepended to whatever `tool_environment` already built, not instead
+        # of it: a run needs both `agentchat` and agforge's own tools.
+        base = os.environ.get("PATH", "") if base_path is None else base_path
+        environment["PATH"] = os.pathsep.join([str(directory), base])
+    return environment
+
+
 def resolve_agforge_role(
     role: str,
     *,
@@ -131,9 +177,18 @@ def run_role(
     profile: str | None = None,
     transcript: Path | None = None,
     record: Path | None = None,
+    home: tuple[str, str] | None = None,
 ) -> tuple[str, dict, int]:
-    """Resolve `role`, run it once, and return output, record, and exit code."""
+    """Resolve `role`, run it once, and return output, record, and exit code.
+
+    `home` is the conversation this run is serving, when there is one; it
+    reaches the run as `AGENTCHAT_HOME`.
+    """
     agent = resolve_agforge_role(role, profile_override=profile)
+    agent = replace(agent, environment={
+        **agent.environment,
+        **chat_environment(home=home, base_path=agent.environment.get("PATH")),
+    })
     result = run_harness(
         agent,
         prompt,

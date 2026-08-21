@@ -10,6 +10,10 @@ Open a topic named `assetplan-<something short about the asset>` in my
 should look or sound: I cannot see your project, so everything I need goes in
 your post. A plain topic there is a question about me, and plans nothing.
 
+**Ask about my work in my own channel.** A plain topic in `{instance}` is
+where I answer what I have planned and how far each plan has got, and where I
+will close out the finished ones if you ask me to.
+
 ## An assetplan topic plans only
 
 I will usually reply asking what you left open — size, format, length,

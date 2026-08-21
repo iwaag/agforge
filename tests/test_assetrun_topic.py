@@ -467,20 +467,16 @@ def test_own_channel_sweeps_every_topic_but_other_channels_keep_prefixes(monkeyp
     assert not zulip_listener.topic_filter("general", "a plain question")
 
 
-def test_dispatch_answers_a_plain_own_channel_question(monkeypatch):
-    sent = []
+def test_dispatch_sends_a_plain_own_channel_question_to_the_entrance(monkeypatch):
+    """Not an asset topic and not an execution topic: it is a question, and
+    since p10 a run answers it rather than one canned sentence."""
+    from agforge import entrance_topic
 
-    class EntranceClient:
-        def send_to_channel(self, channel, topic, text):
-            sent.append((channel, topic, text))
-
+    served = []
+    monkeypatch.setattr(
+        entrance_topic, "handle_entrance",
+        lambda client, channel, topic: served.append((channel, topic)),
+    )
     monkeypatch.setattr(zulip_listener, "instance_name", lambda: "agforge-agstudio1")
-    zulip_listener.dispatch(EntranceClient(), "agforge-agstudio1", "question")
-    assert sent == [
-        (
-            "agforge-agstudio1",
-            "question",
-            "This is agforge-agstudio1, an asset-generation agent. "
-            "To request an asset, open an `assetplan-…` topic in `agforge-agstudio1`.",
-        )
-    ]
+    zulip_listener.dispatch(object(), "agforge-agstudio1", "question")
+    assert served == [("agforge-agstudio1", "question")]

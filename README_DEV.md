@@ -111,10 +111,21 @@ turn2/turn3).
 
 `agforge-agstudio1` is this instance's Single Entrance: every unresolved
 topic in that Zulip channel reaches the listener. Open an `assetplan-…`
-topic to plan an asset; a plain topic receives the fixed p1 directions. The
-committed `params/intro.md` is posted with `uv run python -m agforge.intro`
-to `#agents`, topic `intro-agforge-agstudio1`, with a date and Git revision
-stamp.
+topic to plan an asset. The committed `params/intro.md` is posted with
+`uv run python -m agforge.intro` to `#agents`, topic
+`intro-agforge-agstudio1`, with a date and Git revision stamp.
+
+**A plain topic there is a question about this instance's work, and since
+`agent_standardize` p10 it is answered by a run** (`entrance_topic.py`) —
+`roles.front` over a generation workspace, guide
+`agent/guides/entrance_front/guide.md`, with `agentchat` on PATH and
+`AGENTCHAT_ZULIP_ENV` naming this bot's credentials (`role_run.py`). It
+reads its own channel's topic list — `assetplan-` plans, `assetrun-` runs,
+`✔ ` for finished — and answers what was asked. Nothing is read from Plane
+and nothing is generated. Asked to close finished conversations out, it
+reads them to check and then `agentchat resolve`s them; it never tidies on
+its own. Every question there is one paid `sonnet` run, where it used to be
+a free canned line.
 
 **Since `agent_standardize` p8 the `assetrun-…` topic is opened by agforge**,
 not invented by the requester: registering the plan opens

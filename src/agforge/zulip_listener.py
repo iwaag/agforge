@@ -3,8 +3,10 @@
 The mechanics live in `agag.zulip`, shared with the other agents' listeners.
 Swept *topics* are routed by `dispatch`: `assetplan-` topics go through
 `assetplan_topic.handle_topic` — the front/generator pair over a generation
-workspace — and `assetrun-` topics through `assetrun_topic.handle_assetrun`
-— one Work execution per trigger. The pull loop (`sweep_serve`) finds every
+workspace — `assetrun-` topics through `assetrun_topic.handle_assetrun`
+— one Work execution per trigger — and anything else in this instance's own
+channel through `entrance_topic.handle_entrance`, a front run that answers
+questions about this instance's work by reading the board. The pull loop (`sweep_serve`) finds every
 unresolved matching topic in a subscribed channel whose last poster is not
 this bot, again on every startup and queue re-registration, so a post that
 arrived while the listener was down is not lost. DMs stay on the event
@@ -34,7 +36,7 @@ ASSETRUN_TOPIC_PREFIX = "assetrun-"
 SWEEP_PREFIXES = (ASSETRUN_TOPIC_PREFIX, ASSETPLAN_TOPIC_PREFIX)
 
 __all__ = [
-    "ZULIP_ENV", "dispatch", "entrance_reply", "handle_message", "log", "main",
+    "ZULIP_ENV", "dispatch", "handle_message", "log", "main",
     "observe_topic", "topic_filter",
 ]
 
@@ -44,24 +46,20 @@ def topic_filter(channel: str, topic: str) -> bool:
     return channel == instance_name() or topic.startswith(SWEEP_PREFIXES)
 
 
-def entrance_reply() -> str:
-    """The p1 placeholder response for questions at this instance's entrance."""
-    name = instance_name()
-    return (
-        f"This is {name}, an asset-generation agent. "
-        f"To request an asset, open an `assetplan-…` topic in `{name}`."
-    )
-
-
 def dispatch(client: ZulipClient, channel: str, topic: str) -> None:
     """Route one swept topic to its handler.
 
     The two prefixes share no stem, so neither can shadow the other and the
     order here is free. Both work in any subscribed channel: an `assetrun-`
     topic carries no project — the project comes from the chosen Work.
+
+    Anything else in this instance's own channel is a question, and since
+    `agent_standardize` p10 it is answered by a front run reading the board
+    rather than by one canned sentence.
     """
     from .assetplan_topic import handle_topic
     from .assetrun_topic import handle_assetrun
+    from .entrance_topic import handle_entrance
 
     if topic.startswith(ASSETRUN_TOPIC_PREFIX):
         handle_assetrun(client, channel, topic)
@@ -69,7 +67,7 @@ def dispatch(client: ZulipClient, channel: str, topic: str) -> None:
     if topic.startswith(ASSETPLAN_TOPIC_PREFIX):
         handle_topic(client, channel, topic)
         return
-    client.send_to_channel(channel, topic, entrance_reply())
+    handle_entrance(client, channel, topic)
 
 
 def handle_message(client: ZulipClient, message: dict, self_id: int) -> None:
