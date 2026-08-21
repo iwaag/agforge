@@ -33,9 +33,9 @@ def wire(monkeypatch, tmp_path, answer="Two plans; one finished.", exit_code=0):
     calls = {}
 
     def run_role(role, prompt, *, cwd, timeout, record=None, home=None,
-                 transcript=None, **kw):
+                 transcript=None, stream=False, **kw):
         calls.update(role=role, prompt=prompt, cwd=cwd, home=home,
-                     timeout=timeout, transcript=transcript)
+                     timeout=timeout, transcript=transcript, stream=stream)
         return answer, {}, exit_code
 
     monkeypatch.setattr(entrance_topic, "run_role", run_role)
@@ -74,6 +74,9 @@ def test_what_the_run_looked_at_is_kept(monkeypatch, tmp_path):
     calls = wire(monkeypatch, tmp_path)
     entrance_topic.serve_entrance(context())
     assert calls["transcript"] == calls["cwd"] / "transcript.jsonl"
+    # And it must be the streamed record: without this the file holds a cost
+    # report, which cannot tell a skipped topic from an empty one.
+    assert calls["stream"] is True
 
 
 def test_the_run_knows_which_conversation_it_is_serving(monkeypatch, tmp_path):

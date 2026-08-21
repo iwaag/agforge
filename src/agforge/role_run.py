@@ -178,6 +178,7 @@ def run_role(
     transcript: Path | None = None,
     record: Path | None = None,
     home: tuple[str, str] | None = None,
+    stream: bool = False,
 ) -> tuple[str, dict, int]:
     """Resolve `role`, run it once, and return output, record, and exit code.
 
@@ -195,6 +196,7 @@ def run_role(
         cwd=cwd,
         timeout=timeout,
         allowed_tools=ROLE_ALLOWED_TOOLS.get(role),
+        stream=stream,
         transcript_path=transcript,
     )
     run_record = {"schema": "ag.agent-run.v1", **result.meta}

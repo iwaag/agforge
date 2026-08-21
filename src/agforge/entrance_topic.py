@@ -112,6 +112,7 @@ def serve_entrance(context) -> TopicResult:
         # in it — which is how `agent_standardize` p10 lost a whole project
         # on autolab's side and could not say why.
         transcript=workspace / "transcript.jsonl",
+        stream=True,
         home=(context.channel, context.topic),
     )
     if exit_code != 0:
