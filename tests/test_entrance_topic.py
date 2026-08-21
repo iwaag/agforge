@@ -32,8 +32,10 @@ def wire(monkeypatch, tmp_path, answer="Two plans; one finished.", exit_code=0):
     monkeypatch.setattr(entrance_topic, "RECORDS_ROOT", tmp_path / "records")
     calls = {}
 
-    def run_role(role, prompt, *, cwd, timeout, record=None, home=None, **kw):
-        calls.update(role=role, prompt=prompt, cwd=cwd, home=home, timeout=timeout)
+    def run_role(role, prompt, *, cwd, timeout, record=None, home=None,
+                 transcript=None, **kw):
+        calls.update(role=role, prompt=prompt, cwd=cwd, home=home,
+                     timeout=timeout, transcript=transcript)
         return answer, {}, exit_code
 
     monkeypatch.setattr(entrance_topic, "run_role", run_role)
@@ -64,6 +66,14 @@ def test_our_own_ack_is_not_conversation(monkeypatch, tmp_path):
         {"id": 2, "sender_id": 8, "sender_full_name": "Developer", "content": "well?"},
     ]))
     assert (calls["cwd"] / "chatlog.md").read_text(encoding="utf-8") == "[Developer] well?\n"
+
+
+def test_what_the_run_looked_at_is_kept(monkeypatch, tmp_path):
+    """An answer that skipped a topic and one that found nothing in it read
+    the same. The transcript is what separates them afterwards."""
+    calls = wire(monkeypatch, tmp_path)
+    entrance_topic.serve_entrance(context())
+    assert calls["transcript"] == calls["cwd"] / "transcript.jsonl"
 
 
 def test_the_run_knows_which_conversation_it_is_serving(monkeypatch, tmp_path):

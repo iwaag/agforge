@@ -107,6 +107,11 @@ def serve_entrance(context) -> TopicResult:
         cwd=workspace,
         timeout=ENTRANCE_TIMEOUT_SECONDS,
         record=next_record_path(RECORDS_ROOT / "entrance_front"),
+        # What the run actually looked at. Without it, an answer that
+        # skipped a topic is indistinguishable from one that found nothing
+        # in it — which is how `agent_standardize` p10 lost a whole project
+        # on autolab's side and could not say why.
+        transcript=workspace / "transcript.jsonl",
         home=(context.channel, context.topic),
     )
     if exit_code != 0:
