@@ -25,8 +25,15 @@ hand-made, or predates this phase, and gets the whole library.
 
 The result goes to **both** topics: the `assetrun-` one, through
 `serve_topic`'s ordinary reply, and the `assetplan-` one the root note names,
-where the requester was talking. Both name whoever triggered the run, because
-being named is how their next turn happens at all.
+where the requester was talking.
+
+**Only the delivery names the trigger** (`agent_standardize` p9). Being named
+is how a requester's next turn happens at all, so naming them in both places
+gives them two — p8's proof watched Front tell the developer "done" twice for
+one image. Harmless there; where the requester is a supercoder it is a second
+run against a live repository. The delivery is the post that counts, because
+it is what the requester was waiting for. The `assetrun-` reply is the
+record, and `handoff=False` keeps it from handing anybody a turn.
 """
 
 from __future__ import annotations
@@ -260,6 +267,10 @@ def handle_assetrun(client: ZulipClient, channel: str, topic: str) -> None:
         client, channel, topic, serve,
         ack_text=SWEEP_ACK,
         empty_reply=EMPTY_REPLY,
+        # The delivery into the `assetplan-` topic names the trigger. This
+        # post is the record of the run, and naming them here too would buy
+        # them a second run for one delivery.
+        handoff=False,
     )
 
 

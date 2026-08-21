@@ -174,9 +174,12 @@ def test_the_trigger_post_reaches_the_generator_as_a_chatlog(monkeypatch, tmp_pa
     assert "selfnote" not in chatlog
 
 
-def test_the_result_reaches_both_topics(monkeypatch, tmp_path):
-    """The run topic gets the report; the plan topic gets the delivery, where
-    the requester was talking. Both name whoever triggered it."""
+def test_the_result_reaches_both_topics_and_only_one_names_the_trigger(
+    monkeypatch, tmp_path
+):
+    """The plan topic gets the delivery, which names the trigger and is the
+    post they were waiting for. The run topic gets the record, which names
+    nobody — `agent_standardize` p9, one callback per delivery."""
     calls = []
     wire(monkeypatch, tmp_path, calls)
     assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
@@ -184,7 +187,7 @@ def test_the_result_reaches_both_topics(monkeypatch, tmp_path):
     posted = [(c[1], c[2]) for c in calls if c[0] == "write"]
     assert [topic for topic, _ in posted] == [TOPIC, ORIGIN_TOPIC, TOPIC]
     assert posted[1][1].startswith("@**Developer**")
-    assert posted[2][1].startswith("@**Developer**")
+    assert "@**Developer**" not in posted[2][1]
     assert f"delivered to {CHANNEL}/{ORIGIN_TOPIC}" in posted[2][1]
 
 

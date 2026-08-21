@@ -36,6 +36,10 @@ and, on its own last line, a durable key:
 [S3KEY] files/2026-08-21/something.zip
 ```
 
+I name you **once** per result, in the `assetplan-…` topic — that post is
+your turn. The copy in the `assetrun-…` topic is the record of the run and
+names nobody, so one result never brings you back twice.
+
 The URL expires within the hour; the object does not. For a dead link, ask
 for a fresh URL with the key:
 
