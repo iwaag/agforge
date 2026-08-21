@@ -15,6 +15,13 @@ from agag import topics
 from agag.topics import GuideError
 
 from agforge import assetplan_topic, toolsets
+from agforge.plane import Registration
+
+RUN_TOPIC = "assetrun-20260814-120000-abc"
+REGISTERED = Registration(
+    line="registered PA-1", project_id="p-free", issue_id="i-1",
+    title="Draw the bird", label="PA-1",
+)
 
 BOT_ID = 13
 HUMAN_ID = 8
@@ -60,11 +67,13 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
     monkeypatch.setattr(assetplan_topic, "TOPICS_ROOT", tmp_path / "topics")
     monkeypatch.setattr(assetplan_topic, "RECORDS_ROOT", tmp_path / "records")
     # Posting goes through the shared skeleton, so that is where it is caught.
-    monkeypatch.setattr(
-        topics,
-        "topic_write",
-        lambda topic, text, **kwargs: calls.append(("write", topic, text)) or "success",
+    writer = lambda topic, text, **kwargs: (
+        calls.append(("write", topic, text)) or "success"
     )
+    monkeypatch.setattr(topics, "topic_write", writer)
+    # `open_assetrun` posts into the run topic itself, not through the
+    # skeleton, so its own name has to be caught as well.
+    monkeypatch.setattr(assetplan_topic, "topic_write", writer)
 
     def front_run(prompt, cwd):
         calls.append(("front", prompt, cwd))
@@ -147,7 +156,7 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
         assetplan_topic,
         "register_plan",
         lambda channel, topic, plan, tools: (
-            calls.append(("plan", plan, tools)) or "registered PA-1"
+            calls.append(("plan", plan, tools)) or REGISTERED
         ),
     )
 
@@ -156,15 +165,20 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
     generator = gen_dir(tmp_path, 1, "generator")
     assert [call[0] for call in calls] == [
         "whoami", "write", "history", "front", "write", "generator", "plan",
+        # opening the Work's own run topic: is it anchored already, then the
+        # two selfnotes and the one visible line
+        "history", "write", "write", "write",
         # the handoff lookup, the reply, then the post-run re-check
         "history", "write", "history",
     ]
     assert (generator / "required_items.md").read_text() == "one bird, blue"
     assert [path.name for path in (generator / "tools").iterdir()] == ["toolset-image.md"]
     assert calls[5][1] == generator
-    # plan.md is registered, idea.md is relayed verbatim, then the answer.
+    # plan.md is registered, the run topic is named, idea.md is relayed
+    # verbatim, then the answer.
     assert written(calls)[-1] == (
-        "@**Developer**\n\nregistered PA-1\n\nbuy a GPU\n\nmade it"
+        "@**Developer**\n\nregistered PA-1\n\n"
+        f"posting in {RUN_TOPIC} starts it\n\nbuy a GPU\n\nmade it"
     )
 
 
@@ -182,9 +196,12 @@ def test_a_plan_alone_still_reports_and_answers(monkeypatch, tmp_path):
     calls = []
     wire(monkeypatch, tmp_path, calls, writes_required=True,
          writes=(("plan.md", "# Bird\n\nDraw it."),))
-    monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: "registered PA-1")
+    monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: REGISTERED)
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
-    assert written(calls)[-1] == "@**Developer**\n\nregistered PA-1\n\nmade it"
+    assert written(calls)[-1] == (
+        "@**Developer**\n\nregistered PA-1\n\n"
+        f"posting in {RUN_TOPIC} starts it\n\nmade it"
+    )
 
 
 # --- (b2) toolsets.csv → tools/ --------------------------------------------
@@ -365,3 +382,46 @@ def test_guide_refuses_to_start_without_the_file(monkeypatch, tmp_path):
     monkeypatch.setattr(assetplan_topic, "GUIDES", tmp_path)
     with pytest.raises(GuideError):
         assetplan_topic.guide("assetplan_front", "guide.md")
+
+
+# --- (c) registering the plan opens the Work's own run topic ---------------
+
+
+def test_registering_opens_the_run_topic_with_its_two_anchors(monkeypatch, tmp_path):
+    """The requester never invents an `assetrun-` name, and the topic that is
+    opened says what it runs — that is what replaced `next_work`'s guess."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls, writes_required=True,
+         writes=(("plan.md", "# Bird\n\nDraw it."),))
+    monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: REGISTERED)
+
+    assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
+
+    into_run_topic = [call[2] for call in calls if call[0] == "write" and call[1] == RUN_TOPIC]
+    assert into_run_topic[0] == f"[selfnote][rootchat] {CHANNEL}/{TOPIC}"
+    assert into_run_topic[1] == "[selfnote][work] p-free/i-1"
+    # Everything a reader ever sees of it is the third line.
+    assert len(into_run_topic) == 3
+    assert 'PA-1 "Draw the bird"' in into_run_topic[2]
+    assert TOPIC in into_run_topic[2]
+    assert "selfnote" not in into_run_topic[2]
+
+
+def test_a_second_generation_finds_the_run_topic_already_anchored(monkeypatch, tmp_path):
+    """One Work, one run topic, however far the generation number climbs."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls, writes_required=True,
+         writes=(("plan.md", "# Bird\n\nDraw it."),))
+    monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: REGISTERED)
+
+    class Anchored(Client):
+        def topic_history(self, channel, topic, num_before):
+            self.calls.append(("history", channel, topic, num_before))
+            if topic == RUN_TOPIC:
+                return [message(BOT_ID, "Forge", "[selfnote][work] p-free/i-1", 2)]
+            return self.history
+
+    assetplan_topic.handle_topic(Anchored(calls), CHANNEL, TOPIC)
+
+    assert [call for call in calls if call[0] == "write" and call[1] == RUN_TOPIC] == []
+    assert f"posting in {RUN_TOPIC} starts it" in written(calls)[-1]

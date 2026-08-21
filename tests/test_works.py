@@ -1,48 +1,12 @@
-"""Work selection is pure policy over Plane row dicts — tested with fixture
-rows and monkeypatched listing functions, no HTTP, the way autolab tests its
-`mission.py` original.
+"""What an `assetrun-` topic runs, and how its outcome is written back.
+
+Selection is gone: since `agent_standardize` p8 the topic names its Work, so
+what is pinned here is the lookup (`work_by_id`), the origin key, and
+`report_work`. Fixture rows and monkeypatched listing functions, no HTTP, the
+way autolab tests its `mission.py` original.
 """
 
 from agforge import works
-
-
-# --- eligibility over fixture rows -----------------------------------------
-
-
-def test_eligible_works_filters_label_state_and_parents():
-    groups = {"todo": "unstarted", "doing": "started", "done": "completed"}
-    issues = [
-        {"id": "w", "labels": ["forge-id"], "state": "todo", "created_at": "1",
-         "external_id": "c/t"},                                       # has children
-        {"id": "s1", "parent": "w", "labels": ["forge-id"], "state": "todo",
-         "created_at": "2", "external_id": "c/t@1#1"},                # match
-        {"id": "s2", "parent": "w", "labels": ["forge-id"], "state": "doing",
-         "created_at": "2", "external_id": "c/t@1#2"},                # started
-        {"id": "s3", "parent": "w", "labels": [], "state": "todo",
-         "created_at": "2", "external_id": "c/t@1#3"},                # no label
-        {"id": "lone", "labels": ["forge-id"], "state": "todo", "created_at": "3",
-         "external_id": None},                                        # match, no serial
-    ]
-    assert [row["id"] for row in works.eligible_works(issues, groups, "forge-id")] == [
-        "s1", "lone"
-    ]
-
-
-def test_eligible_works_orders_by_creation_then_serial():
-    groups = {"todo": "unstarted"}
-    rows = [
-        {"id": "b2", "labels": ["a"], "state": "todo", "created_at": "2026-01-02",
-         "external_id": "c/t@1#2"},
-        {"id": "b1", "labels": ["a"], "state": "todo", "created_at": "2026-01-02",
-         "external_id": "c/t@1#1"},
-        {"id": "plain", "labels": ["a"], "state": "todo", "created_at": "2026-01-02",
-         "external_id": "c/t"},
-        {"id": "old", "labels": ["a"], "state": "todo", "created_at": "2026-01-01",
-         "external_id": "c/u@1#9"},
-    ]
-    assert [row["id"] for row in works.eligible_works(rows, groups, "a")] == [
-        "old", "b1", "b2", "plain"
-    ]
 
 
 # --- the origin channel/topic ----------------------------------------------
@@ -64,81 +28,41 @@ def test_a_foreign_or_hand_made_work_has_no_origin():
     assert works.Work("p", "i", "n", "d", "agforge", "no-slash").origin() is None
 
 
-# --- next_work over a fake workspace ---------------------------------------
+# --- the lookup over a fake workspace --------------------------------------
 
 
-def wire(monkeypatch, projects, issues_by_project, labels_by_project=None):
+def wire(monkeypatch, issues_by_project):
     monkeypatch.setattr(works, "load_plane_config", lambda: object())
-    monkeypatch.setattr(works, "list_projects", lambda config: projects)
     monkeypatch.setattr(
-        works, "labels_by_name",
-        lambda config, pid: (labels_by_project or {}).get(pid, {"forgeauto": f"{pid}-forge"}),
+        works, "list_issues", lambda config, pid: issues_by_project.get(pid, [])
     )
-    monkeypatch.setattr(works, "list_issues", lambda config, pid: issues_by_project[pid])
-    monkeypatch.setattr(works, "state_groups", lambda config, pid: {"todo": "unstarted"})
 
 
-def test_next_work_picks_the_oldest_across_marked_projects(monkeypatch):
-    projects = [
-        {"id": "p1", "name": "FreeForge", "description": "[AUTO] agforge request records"},
-        {"id": "p2", "name": "Demo", "description": "[AUTO] autolab project: demo"},
-        {"id": "p3", "name": "ProjectA", "description": "hand made"},
-    ]
-    issues = {
-        "p1": [
-            {"id": "i1", "name": "Later", "labels": ["p1-forge"], "state": "todo",
-             "created_at": "2026-01-05", "external_id": "FreeForge/assetplan-later",
-             "external_source": "agforge",
-             "description_html": "<p>second</p>"},
-        ],
-        "p2": [
-            {"id": "i2", "name": "Older", "labels": ["p2-forge"], "state": "todo",
-             "created_at": "2026-01-01", "external_id": "pj-demo/assetplan-old",
-             "external_source": "agforge",
-             "description_html": "<p>first</p>"},
-        ],
-    }
-    wire(monkeypatch, projects, issues)
-    chosen = works.next_work()
-    assert (chosen.project_id, chosen.issue_id, chosen.name) == ("p2", "i2", "Older")
-    assert chosen.description == "first"
-    assert chosen.origin() == ("pj-demo", "assetplan-old")
+def test_work_by_id_returns_the_work_the_topic_names(monkeypatch):
+    wire(monkeypatch, {"p1": [
+        {"id": "i0", "name": "Another", "description_html": "<p>no</p>"},
+        {"id": "i1", "name": "The one", "external_id": "FreeForge/assetplan-x",
+         "external_source": "agforge", "description_html": "<p>yes</p>"},
+    ]})
+    work = works.work_by_id("p1", "i1")
+    assert (work.project_id, work.issue_id, work.name) == ("p1", "i1", "The one")
+    assert work.description == "yes"
+    assert work.origin() == ("FreeForge", "assetplan-x")
 
 
-def test_a_project_without_the_label_is_skipped(monkeypatch):
-    """autolab's projects carry AUTO, not FORGEAUTO — the label filter is what
-    keeps the two agents off each other's work."""
-    projects = [
-        {"id": "p1", "name": "Demo", "description": "[AUTO] autolab project: demo"},
-    ]
-    issues = {
-        "p1": [
-            {"id": "i1", "name": "Autolab's", "labels": ["p1-auto"], "state": "todo",
-             "created_at": "2026-01-01"},
-        ],
-    }
-    wire(monkeypatch, projects, issues, labels_by_project={"p1": {"auto": "p1-auto"}})
-    assert works.next_work() is None
+def test_a_finished_work_is_still_returned(monkeypatch):
+    """The topic decided, not the state: a re-trigger is a legitimate retry,
+    and there is no eligibility left to consult."""
+    wire(monkeypatch, {"p1": [
+        {"id": "i1", "name": "Done already", "state": "completed", "labels": [],
+         "description_html": "<p>x</p>"},
+    ]})
+    assert works.work_by_id("p1", "i1").name == "Done already"
 
 
-def test_an_unmarked_project_is_never_scanned(monkeypatch):
-    projects = [{"id": "p1", "name": "ProjectA", "description": "hand made"}]
-    scanned = []
-
-    def listing(config, pid):
-        scanned.append(pid)
-        return []
-
-    wire(monkeypatch, projects, {})
-    monkeypatch.setattr(works, "list_issues", listing)
-    assert works.next_work() is None
-    assert scanned == []
-
-
-def test_nothing_eligible_means_none(monkeypatch):
-    projects = [{"id": "p1", "name": "FreeForge", "description": "[AUTO] records"}]
-    wire(monkeypatch, projects, {"p1": []})
-    assert works.next_work() is None
+def test_a_work_that_is_gone_is_none(monkeypatch):
+    wire(monkeypatch, {"p1": []})
+    assert works.work_by_id("p1", "i1") is None
 
 
 # --- reporting back ---------------------------------------------------------

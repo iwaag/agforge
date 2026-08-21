@@ -14,6 +14,12 @@ shared with agautolab. What is agforge's own is the two-agent shape:
 Generation directories are never deleted. Cutting a new `N` is precisely what
 stops a previous generation's `required_items.md` or `plan.md` from being
 re-executed; leftovers are evidence, not garbage.
+
+Registering the Work also **opens its `assetrun-` topic** and anchors it
+(`anchor.py`), the way autolab opens a `workrun-` topic when it plans a task.
+Until p8 the requester had to invent an `assetrun-` name and hope the queue
+picked the right Work; now the plan's registration is what creates the
+button, and the button knows what it is wired to.
 """
 
 from __future__ import annotations
@@ -35,10 +41,17 @@ from agag.topics import (
     serve_topic,
     topic_workspace as shared_topic_workspace,
 )
-from agag.zulip import ZulipClient, log
+from agag.zulip import ZulipClient, log, topic_write
 
 from . import toolsets
-from .plane import register_plan as plane_register_plan
+from .anchor import (
+    Conversation,
+    assetrun_topic_name,
+    own_work,
+    rootchat_note,
+    work_note,
+)
+from .plane import Registration, register_plan as plane_register_plan
 from .role_run import AGFORGE_ROOT, run_role
 from .zulip_chat import ACK_PREFIX, SWEEP_ACK
 
@@ -58,6 +71,12 @@ PLAN_FILE = "plan.md"
 IDEA_FILE = "idea.md"
 EMPTY_REPLY = "There is nothing in this topic to answer yet."
 
+# The two topic names of one request. Spelled here rather than imported from
+# the listener so this module is readable without it; `zulip_listener` owns
+# the same two constants as the sweep's filter.
+ASSETPLAN_TOPIC_PREFIX = "assetplan-"
+ASSETRUN_TOPIC_PREFIX = "assetrun-"
+
 __all__ = [
     "ListenerError",
     "front_prompt",
@@ -65,6 +84,7 @@ __all__ = [
     "guide",
     "handle_generator",
     "handle_topic",
+    "open_assetrun",
     "place_toolsets",
     "register_plan",
     "run_front",
@@ -121,9 +141,52 @@ def run_generator(cwd: Path) -> str:
     )
 
 
-def register_plan(channel: str, topic: str, plan: Path, tools=()) -> str:
+def register_plan(channel: str, topic: str, plan: Path, tools=()) -> Registration:
     """Wrapped so the whole Plane route stays behind one name here."""
     return plane_register_plan(channel, topic, plan, tools)
+
+
+def open_assetrun(
+    client: ZulipClient,
+    channel: str,
+    topic: str,
+    registration: Registration,
+    self_id: int,
+) -> str:
+    """Open this Work's own `assetrun-` topic and anchor it to two things.
+
+    autolab opens a `workrun-` topic when it plans a task; this is the same
+    move on agforge's vocabulary. The topic is opened with its two selfnotes
+    first — the root note back to this `assetplan-` conversation, and the
+    Work id — and then one visible line, which is all a reader ever sees of
+    it. Because forge is its own last real speaker there, opening the topic
+    does not fire it: a post from somebody else is what starts the run, and
+    what that post *says* is read.
+
+    Idempotent by the Work note: a second generation of the same plan finds
+    its topic already anchored and only says where it is.
+    """
+    run_topic = assetrun_topic_name(topic, ASSETRUN_TOPIC_PREFIX, ASSETPLAN_TOPIC_PREFIX)
+    history = client.topic_history(channel, run_topic, num_before=200)
+    if own_work(history, self_id) is None:
+        topic_write(
+            run_topic,
+            rootchat_note(Conversation(channel, topic)),
+            channel=channel, client=client,
+        )
+        topic_write(
+            run_topic,
+            work_note(registration.project_id, registration.issue_id),
+            channel=channel, client=client,
+        )
+        topic_write(
+            run_topic,
+            f'This topic runs {registration.label} "{registration.title}". '
+            "Post here to start it, saying anything you want done differently; "
+            f"the result is posted back here and in {topic}.",
+            channel=channel, client=client,
+        )
+    return f"posting in {run_topic} starts it"
 
 
 def place_toolsets(front_dir: Path, generator_dir: Path) -> list[str]:
@@ -140,9 +203,7 @@ def place_toolsets(front_dir: Path, generator_dir: Path) -> list[str]:
     return toolsets.place(requested, generator_dir / TOOLS_DIR)
 
 
-def handle_generator(
-    channel: str, topic: str, front_dir: Path, number: int
-) -> list[str]:
+def handle_generator(context, front_dir: Path, number: int) -> list[str]:
     """The `required_items.md` branch: build the generator workspace, run it.
 
     What the front *wrote* drives this, not what it said — its answer is
@@ -155,6 +216,7 @@ def handle_generator(
     courtesy owed only to questions. Doing it here as well would name the
     requester twice.
     """
+    channel, topic = context.channel, context.topic
     required = front_dir / REQUIRED_ITEMS
     if not required.is_file():
         return []
@@ -169,7 +231,14 @@ def handle_generator(
     if plan.is_file():
         # The Work carries the toolsets it was planned with, so the run that
         # executes it later gets the same `tools/`.
-        sections.append(register_plan(channel, topic, plan, placed))
+        registration = register_plan(channel, topic, plan, placed)
+        sections.append(registration.line)
+        # Registering the plan is what opens the Work's own topic — the
+        # requester never has to know a name to trigger it, and the topic
+        # itself carries which Work it runs.
+        sections.append(
+            open_assetrun(context.client, channel, topic, registration, context.self_id)
+        )
     idea = generator_dir / IDEA_FILE
     if idea.is_file():
         sections.append(idea.read_text(encoding="utf-8").strip())
@@ -192,14 +261,7 @@ def serve(context) -> TopicResult:
     context.post(answer)
 
     context.step = "generator"
-    return TopicResult(
-        handle_generator(
-            context.channel,
-            context.topic,
-            front_dir,
-            number,
-        )
-    )
+    return TopicResult(handle_generator(context, front_dir, number))
 
 
 def handle_topic(client: ZulipClient, channel: str, topic: str) -> None:

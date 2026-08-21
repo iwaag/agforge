@@ -1,23 +1,32 @@
-"""Execute one Work, triggered by any non-bot post in an `assetrun-` topic.
+"""Execute the Work an `assetrun-` topic was opened for, when somebody posts.
 
-autolab's `handle_run` discipline, on agforge's vocabulary: an `assetrun-`
-topic is a button, not a conversation. The chatlog is never read — whatever
-the topic gets, one eligible Work is chosen from Plane (`works.next_work`),
-executed by the generator in the Work's own persistent workspace, and the
-result is delivered back to the topic the request originally came from.
+autolab's `workrun-` shape, on agforge's vocabulary. Until
+`agent_standardize` p8 this topic was a bare button: the chatlog was never
+read, and any post fired whichever eligible Work `works.next_work` happened
+to pick, which is why the introduction had to ask the requester for "one
+trigger, one Work — let the delivery land before the next one". That burden
+is gone. The topic is opened by the assetplan flow when it registers the
+plan, and it carries two selfnotes (`anchor.py`) saying which Work it runs
+and which `assetplan-` conversation it belongs to. A trigger is answered by
+reading the topic.
+
+So the chatlog is real input now: whoever posts says what they want done, the
+same way a `workrun-` post does, and the generator gets it beside `plan.md`.
 
 The workspace is `.local/agentws/<work id>/generator/` — per Work, not per
-topic, and never deleted. A re-trigger rebuilds `plan.md` and `tools/` from
-the Work and leaves `result/`/`intermediate/` as they are; there is no dirty
-check on purpose (the braindump drops autolab's create/delete dance).
+topic, and never deleted. A re-trigger rebuilds `plan.md`, `chatlog.md` and
+`tools/` from the Work and the topic, and leaves `result/`/`intermediate/` as
+they are; there is no dirty check on purpose (the braindump drops autolab's
+create/delete dance).
 
 `tools/` is what the Work's `[TOOLS]` description footer names — the
 toolsets the create flow planned it with. A Work without that footer is
 hand-made, or predates this phase, and gets the whole library.
 
-After the ack, every path posts to the topic before returning: the sweep only
-re-fires when the last poster is not the bot, so the final post is both the
-report and the off-switch.
+The result goes to **both** topics: the `assetrun-` one, through
+`serve_topic`'s ordinary reply, and the `assetplan-` one the root note names,
+where the requester was talking. Both name whoever triggered the run, because
+being named is how their next turn happens at all.
 """
 
 from __future__ import annotations
@@ -26,14 +35,23 @@ import shutil
 from pathlib import Path
 
 from agag.plane import compose_document, description_html
-from agag.topics import guide as shared_guide, next_record_path
+from agag.topics import (
+    TopicResult,
+    chatlog_path,
+    format_chatlog,
+    guide as shared_guide,
+    handoff_mention,
+    next_record_path,
+    serve_topic,
+)
 from agag.zulip import ZulipClient, log, topic_write
 
 from . import generate, toolsets
+from .anchor import own_rootchat, own_work
 from .plane import split_tools_footer
 from .role_run import AGFORGE_ROOT, run_role
-from .works import Work, next_work, report_work
-from .zulip_chat import SWEEP_ACK
+from .works import Work, report_work, work_by_id
+from .zulip_chat import ACK_PREFIX, SWEEP_ACK
 
 AGENTWS_ROOT = AGFORGE_ROOT / ".local" / "agentws"
 GUIDES = AGFORGE_ROOT / "agent" / "guides"
@@ -50,7 +68,17 @@ FAILURE_FLAG = "failure.flag"
 # assetplan-flow generator 900 s; this sits at the top of that range.
 ASSETRUN_TIMEOUT_SECONDS = 1200
 
-NO_WORK_REPLY = "no work"
+# A topic nobody anchored. Not an error and not a guess: since p8 an
+# `assetrun-` topic is opened by the plan that owns it, so one that says
+# nothing about itself is somebody's hand-made name and has no Work to run.
+UNANCHORED_REPLY = (
+    "This topic is not the run topic of any plan of mine, so there is nothing "
+    "here to execute. Open an `assetplan-…` topic to plan an asset; I open its "
+    "`assetrun-…` topic myself when the plan is registered, and that is the one "
+    "to post in."
+)
+EMPTY_REPLY = "There is nothing in this topic to answer yet."
+
 FAILED_PREFIX = "the run reported failure; what it produced follows"
 
 # The durable half of a delivery, on its own last line — the same shape as the
@@ -63,10 +91,11 @@ S3_KEY_MARKER = "[S3KEY]"
 
 __all__ = [
     "AGENTWS_ROOT",
+    "EMPTY_REPLY",
     "FAILED_PREFIX",
     "FAILURE_FLAG",
-    "NO_WORK_REPLY",
     "S3_KEY_MARKER",
+    "UNANCHORED_REPLY",
     "ListenerError",
     "deliver_to_origin",
     "handle_assetrun",
@@ -74,6 +103,7 @@ __all__ = [
     "result_files",
     "run_generator",
     "s3_key_footer",
+    "serve",
     "upload_result",
     "workspace_dir",
     "zip_result",
@@ -82,6 +112,11 @@ __all__ = [
 
 class ListenerError(RuntimeError):
     """One assetrun-topic workflow could not complete."""
+
+
+def is_ack(content: str) -> bool:
+    """Our own transport noise, which is not conversation."""
+    return content.startswith(ACK_PREFIX) or content == SWEEP_ACK
 
 
 def workspace_dir(issue_id: str) -> Path:
@@ -132,77 +167,100 @@ def run_generator(workspace: Path) -> str:
     return output.strip()
 
 
-def handle_assetrun(client: ZulipClient, channel: str, topic: str) -> None:
-    """Choose, execute, deliver, and always answer the topic."""
-    log(f"assetrun topic {channel!r}/{topic!r}")
-    topic_write(topic, SWEEP_ACK, channel=channel, client=client)
+def serve(context) -> TopicResult:
+    """One trigger: the Work this topic names, run and delivered twice.
 
-    sections: list[str] = []
-    step = "choosing the work"
-    try:
-        chosen = next_work()
-        if chosen is None:
-            topic_write(topic, NO_WORK_REPLY, channel=channel, client=client)
-            return
-        sections.append(f'running "{chosen.name}"')
+    Everything the run needs is read off the topic — which Work
+    (`[selfnote][work]`), where the requester is talking
+    (`[selfnote][rootchat]`), and what they just asked for (the chatlog).
+    Nothing is chosen from a queue.
+    """
+    anchored = own_work(context.history, context.self_id)
+    if anchored is None:
+        return TopicResult([UNANCHORED_REPLY])
+    project_id, issue_id = anchored
 
-        step = "preparing the workspace"
-        workspace = prepare_workspace(chosen)
+    context.step = "loading the work"
+    work = work_by_id(project_id, issue_id)
+    if work is None:
+        return TopicResult([
+            f"the Work this topic runs ({issue_id}) is gone from Plane; "
+            "plan it again in an `assetplan-…` topic"
+        ])
+    sections = [f'running "{work.name}"']
 
-        step = "generator run"
-        answer = run_generator(workspace)
-        # The run exiting zero is not the whole verdict: the guide tells the
-        # generator to leave `failure.flag` when it knows it failed. An empty
-        # `result/` is still a legitimate pure-text outcome, not a signal.
-        succeeded = not (workspace / FAILURE_FLAG).exists()
-        if not succeeded:
-            sections.append(f"{FAILURE_FLAG} is present: the generator reports failure")
+    context.step = "preparing the workspace"
+    workspace = prepare_workspace(work)
+    # The conversation is input, not decoration: this is where the trigger
+    # says what it wants of a plan that was written some time ago.
+    chatlog_path(workspace).write_text(
+        format_chatlog(context.history, context.self_id, drop=is_ack), encoding="utf-8"
+    )
 
-        step = "packaging the result"
-        files = result_files(workspace)
-        comment = answer
-        if files:
-            key, url = upload_result(zip_result(workspace))
-            footer = s3_key_footer(key)
-            delivery = (
-                f"result of \"{chosen.name}\" ({len(files)} file(s)), "
-                f"temporary download (expires in {generate.DEFAULT_TTL_MINUTES} min): "
-                f"{url}\n{footer}"
-            )
-            # The Plane comment is the ledger consumers read months later, so
-            # it carries the key too — never only the URL that outlives it by
-            # an hour.
-            comment = f"{answer}\n\n{footer}" if answer else footer
-            sections.append(
-                f"result/ holds {len(files)} file(s); zipped and uploaded as {key}"
-            )
-        else:
-            delivery = answer
-            sections.append("result/ is empty; delivering the answer text")
-        if not succeeded:
-            # The requester hears the same verdict the Work does; whatever
-            # the run did produce still travels with it.
-            delivery = f"{FAILED_PREFIX}\n\n{delivery}"
+    context.step = "generator run"
+    answer = run_generator(workspace)
+    # The run exiting zero is not the whole verdict: the guide tells the
+    # generator to leave `failure.flag` when it knows it failed. An empty
+    # `result/` is still a legitimate pure-text outcome, not a signal.
+    succeeded = not (workspace / FAILURE_FLAG).exists()
+    if not succeeded:
+        sections.append(f"{FAILURE_FLAG} is present: the generator reports failure")
 
-        step = "origin delivery"
-        sections.append(deliver_to_origin(client, chosen, delivery))
-
-        step = "reporting to plane"
-        # `success=False` leaves the Work in its unstarted state, so it stays
-        # selectable and a re-trigger runs it again.
-        label, commented, completed = report_work(
-            chosen.project_id, chosen.issue_id, comment, succeeded
+    context.step = "packaging the result"
+    files = result_files(workspace)
+    comment = answer
+    if files:
+        key, url = upload_result(zip_result(workspace))
+        footer = s3_key_footer(key)
+        delivery = (
+            f"result of \"{work.name}\" ({len(files)} file(s)), "
+            f"temporary download (expires in {generate.DEFAULT_TTL_MINUTES} min): "
+            f"{url}\n{footer}"
         )
+        # The Plane comment is the ledger consumers read months later, so it
+        # carries the key too — never only the URL that outlives it by an hour.
+        comment = f"{answer}\n\n{footer}" if answer else footer
         sections.append(
-            f"work {label}: commented {'yes' if commented else 'no'}, "
-            f"Done {'yes' if completed else 'no'}"
+            f"result/ holds {len(files)} file(s); zipped and uploaded as {key}"
         )
-    except Exception as error:  # noqa: BLE001 - the topic is the error channel
-        log(f"assetrun topic workflow failed during {step}: {error!r}")
-        sections.append(f"failed during {step}: {error}")
+    else:
+        delivery = answer
+        sections.append("result/ is empty; delivering the answer text")
+    if not succeeded:
+        # The requester hears the same verdict the Work does; whatever the run
+        # did produce still travels with it.
+        delivery = f"{FAILED_PREFIX}\n\n{delivery}"
 
-    topic_write(topic, "\n\n".join(section for section in sections if section),
-                channel=channel, client=client)
+    context.step = "origin delivery"
+    sections.append(deliver_to_origin(context, work, delivery))
+
+    context.step = "reporting to plane"
+    # `success=False` leaves the Work in its unstarted state, so it stays
+    # selectable and a re-trigger runs it again.
+    label, commented, completed = report_work(
+        work.project_id, work.issue_id, comment, succeeded
+    )
+    sections.append(
+        f"work {label}: commented {'yes' if commented else 'no'}, "
+        f"Done {'yes' if completed else 'no'}"
+    )
+    return TopicResult(sections)
+
+
+def handle_assetrun(client: ZulipClient, channel: str, topic: str) -> None:
+    """Serve one triggered assetrun topic through the shared skeleton.
+
+    The skeleton is what it was a button instead of: an ack so the sweep
+    leaves it alone while the generator works, the chatlog, always an answer,
+    a reply that names whoever spoke last, and a re-check for a post that
+    arrived during the run.
+    """
+    log(f"assetrun topic {channel!r}/{topic!r}")
+    serve_topic(
+        client, channel, topic, serve,
+        ack_text=SWEEP_ACK,
+        empty_reply=EMPTY_REPLY,
+    )
 
 
 def result_files(workspace: Path) -> list[Path]:
@@ -237,21 +295,41 @@ def s3_key_footer(key: str) -> str:
     return f"{S3_KEY_MARKER} {key}"
 
 
-def deliver_to_origin(client: ZulipClient, work: Work, delivery: str) -> str:
-    """Post the delivery to the topic the request came from, and say what
-    happened either way — the assetrun summary must survive everything,
-    including a dead origin channel.
+def origin_of(context, work: Work) -> tuple[str, str] | None:
+    """Where the requester is talking: the topic's root note, or the Work's key.
 
-    The origin `assetplan-` topic may already be resolved (`✔`); posting under
-    the plain name still lands (Zulip treats it as that topic's thread), and
-    this bot being last poster there cannot re-trigger the create sweep.
+    The root note is what forge wrote when it opened this topic, so it is the
+    answer for anything planned since p8. `work.origin()` — p1's
+    `<channel>/<topic>` external id — still answers for a Work planned
+    before that.
     """
-    origin = work.origin()
+    home = own_rootchat(context.history, context.self_id)
+    return home.as_pair() if home is not None else work.origin()
+
+
+def deliver_to_origin(context, work: Work, delivery: str) -> str:
+    """Post the delivery into the `assetplan-` topic, naming who triggered it.
+
+    The trigger came from somewhere, and whoever made it is waiting in their
+    own conversation, not in this one. Naming them is not courtesy: a
+    participant of a topic is served only when a post names it, so this is
+    the thing that gives them their turn back.
+
+    Said either way — the assetrun summary must survive everything, including
+    a dead origin channel. The origin `assetplan-` topic may already be
+    resolved (`✔`); posting under the plain name still lands, and this bot
+    being last poster there cannot re-trigger the assetplan sweep.
+    """
+    origin = origin_of(context, work)
     if origin is None:
         return f"no origin topic recorded; the result stays here:\n\n{delivery}"
     channel, topic = origin
+    trigger = handoff_mention(
+        context.client, context.channel, context.topic, context.self_id
+    )
+    body = f"{trigger}\n\n{delivery}" if trigger else delivery
     try:
-        topic_write(topic, delivery, channel=channel, client=client)
+        topic_write(topic, body, channel=channel, client=context.client)
     except Exception as error:  # noqa: BLE001 - reported, never fatal
         log(f"origin delivery to {channel!r}/{topic!r} failed: {error!r}")
         return (

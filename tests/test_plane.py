@@ -180,7 +180,7 @@ def test_ensure_label_reuses_an_existing_label_case_insensitively(monkeypatch):
 def test_a_project_channel_routes_to_its_own_project(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE, DEMO])
     wire(monkeypatch, fake)
-    line = plane.register_plan("pj-demo-project", "assetplan-x", plan_file(tmp_path))
+    line = plane.register_plan("pj-demo-project", "assetplan-x", plan_file(tmp_path)).line
     assert "in Demo Project" in line
     assert "instead" not in line
     assert fake.bodies("POST", "/issues/")[0]["external_id"] == "pj-demo-project/assetplan-x"
@@ -189,7 +189,7 @@ def test_a_project_channel_routes_to_its_own_project(monkeypatch, tmp_path):
 def test_a_missing_project_falls_back_to_freeforge_and_says_so(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE])
     wire(monkeypatch, fake)
-    line = plane.register_plan("pj-absent", "assetplan-x", plan_file(tmp_path))
+    line = plane.register_plan("pj-absent", "assetplan-x", plan_file(tmp_path)).line
     # A fallback is a routing fact reported on the topic, not a failure.
     assert "no Plane project named 'absent'" in line
     assert "registering in FreeForge instead" in line
@@ -199,16 +199,19 @@ def test_a_missing_project_falls_back_to_freeforge_and_says_so(monkeypatch, tmp_
 def test_a_malformed_project_channel_falls_back_too(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE])
     wire(monkeypatch, fake)
-    line = plane.register_plan("pj-Bad_Name", "assetplan-x", plan_file(tmp_path))
+    line = plane.register_plan("pj-Bad_Name", "assetplan-x", plan_file(tmp_path)).line
     assert "does not carry a valid project name" in line
 
 
 def test_a_non_project_channel_routes_to_freeforge(monkeypatch, tmp_path):
     fake = Plane(projects=[FREEFORGE, DEMO])
     wire(monkeypatch, fake)
-    assert plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path)) == (
-        'created FF-7 "Draw the bird" in FreeForge'
-    )
+    registered = plane.register_plan("FreeForge", "assetplan-x", plan_file(tmp_path))
+    assert registered.line == 'created FF-7 "Draw the bird" in FreeForge'
+    # The identity travels with the sentence: it is what the Work's own
+    # `assetrun-` topic is anchored to.
+    assert (registered.project_id, registered.issue_id) == ("p-free", "i-1")
+    assert (registered.title, registered.label) == ("Draw the bird", "FF-7")
 
 
 def test_freeforge_is_created_on_first_use(monkeypatch, tmp_path):
@@ -229,8 +232,10 @@ def test_serving_the_same_topic_twice_updates_one_work(monkeypatch, tmp_path):
     second = plane.register_plan(
         "FreeForge", "assetplan-x", plan_file(tmp_path, "# Draw a bluer bird\n\nAgain.\n")
     )
-    assert first.startswith("created ")
-    assert second.startswith("updated ")
+    assert first.line.startswith("created ")
+    assert second.line.startswith("updated ")
+    # One Work, so one identity, however far the generation number climbs.
+    assert (first.project_id, first.issue_id) == (second.project_id, second.issue_id)
     assert len(fake.bodies("POST", "/issues/")) == 1
     assert fake.bodies("PATCH", "/")[0]["name"] == "Draw a bluer bird"
 

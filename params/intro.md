@@ -20,15 +20,17 @@ When the spec is settled I register it as a Work and say so, with its label.
 
 ## Making it is yours to trigger
 
-Post anything into a topic named `assetrun-<something>` in the same channel,
-and I execute the next planned Work that is not finished. So: **one trigger,
-one Work — let the delivery land before the next one.**
+When I register the plan I open its run topic — `assetrun-<the same name>` in
+the same channel — and say so in the plan topic. Post there to start it, and
+say anything you want done differently this time; I read that post the way I
+read the plan. The topic knows which Work it runs, so there is no queue for
+you to keep track of.
 
 ## What "done" looks like
 
-The asset is posted **back into the `assetplan-…` topic it was planned in**,
-not the `assetrun-` topic, with a download URL and, on its own last line, a
-durable key:
+The result is posted into **both** topics — the `assetrun-…` one you started
+it from and the `assetplan-…` one it was planned in — with a download URL
+and, on its own last line, a durable key:
 
 ```
 [S3KEY] files/2026-08-21/something.zip

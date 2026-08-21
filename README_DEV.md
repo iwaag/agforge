@@ -111,11 +111,24 @@ turn2/turn3).
 
 `agforge-agstudio1` is this instance's Single Entrance: every unresolved
 topic in that Zulip channel reaches the listener. Open an `assetplan-…`
-topic to plan an asset, and post in an `assetrun-…` topic to execute one
-planned Work; a plain topic receives the fixed p1 directions. The committed
-`params/intro.md` is posted with `uv run python -m agforge.intro` to
-`#agents`, topic `intro-agforge-agstudio1`, with a date and Git revision
+topic to plan an asset; a plain topic receives the fixed p1 directions. The
+committed `params/intro.md` is posted with `uv run python -m agforge.intro`
+to `#agents`, topic `intro-agforge-agstudio1`, with a date and Git revision
 stamp.
+
+**Since `agent_standardize` p8 the `assetrun-…` topic is opened by agforge**,
+not invented by the requester: registering the plan opens
+`assetrun-<the same stem>` in the same channel and anchors it with two
+selfnotes (`src/agforge/anchor.py`) — the `[rootchat]` note back to the
+`assetplan-` conversation, and a `[work]` note carrying the Plane ids.
+Selfnotes are `agag.selfnote`'s convention and are invisible in every
+chatlog, `threads/` file and `agentchat read`, so the topic shows one
+human-readable line. A post there runs *that* Work; `works.next_work` and its
+eligibility policy are gone, and with them the requester's old burden of "one
+trigger, one Work — let the delivery land before the next one". The trigger
+post is real input: it reaches the generator as `chatlog.md` beside
+`plan.md`. The result is posted into both topics, each naming whoever
+triggered the run.
 
 The prefixes say plan-versus-execute on purpose (`agent_standardize` p3,
 2026-08-21): `assetplan-` was `create-` and `assetrun-` was `runcreate-`.

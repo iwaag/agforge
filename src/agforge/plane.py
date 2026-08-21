@@ -17,6 +17,7 @@ only `AUTO`-labelled issues, agforge's only `FORGEAUTO`-labelled ones.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from agag import plane as shared
@@ -64,6 +65,7 @@ _LABEL_CACHE: dict[tuple[str, str], str] = {}
 
 __all__ = [
     "AUTO_MARKER",
+    "Registration",
     "FORGE_LABEL",
     "TOOLS_MARKER",
     "PlaneError",
@@ -189,13 +191,29 @@ def resolve_project(config, channel: str) -> tuple[dict, str | None]:
     return _fallback(config), note
 
 
-def register_plan(channel: str, topic: str, plan: Path, tools=()) -> str:
+@dataclass(frozen=True)
+class Registration:
+    """One registered Work: what to say about it, and how to name it again.
+
+    The identity is returned, not only the sentence, because since p8 the
+    caller opens the Work's own `assetrun-` topic and anchors it to these
+    two ids — a topic that says what it runs instead of a queue that guesses.
+    """
+
+    line: str
+    project_id: str
+    issue_id: str
+    title: str
+    label: str
+
+
+def register_plan(channel: str, topic: str, plan: Path, tools=()) -> Registration:
     """Register one generator `plan.md` as this topic's Plane Work.
 
     `tools` are the toolsets this generation actually placed in `tools/`;
     they travel to the executing run as the description's `[TOOLS]` footer.
-    Returns the report line(s) for the topic. Updating through the same
-    external key is what keeps one topic to one Work.
+    Updating through the same external key is what keeps one topic to one
+    Work.
     """
     title, description = split_document(plan.read_text(encoding="utf-8"))
     description = with_tools_footer(description, tools)
@@ -208,6 +226,7 @@ def register_plan(channel: str, topic: str, plan: Path, tools=()) -> str:
             config, project_id, str(existing["id"]),
             {"name": title.strip(), "description_html": description_html(description)},
         )
+        issue = existing
         line = f'updated {issue_label(project, existing)} "{title}"'
     else:
         issue, _ = ensure_issue(
@@ -224,4 +243,10 @@ def register_plan(channel: str, topic: str, plan: Path, tools=()) -> str:
         )
         line = f'created {issue_label(project, issue)} "{title}"'
     line += f" in {project.get('name', '?')}"
-    return f"{note}\n{line}" if note else line
+    return Registration(
+        line=f"{note}\n{line}" if note else line,
+        project_id=project_id,
+        issue_id=str(issue["id"]),
+        title=title.strip(),
+        label=issue_label(project, issue),
+    )
