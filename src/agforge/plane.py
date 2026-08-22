@@ -37,11 +37,13 @@ from agag.plane import (
     update_issue,
 )
 
+from agag.plane import credentials_path
+
 from .role_run import AGFORGE_ROOT
 
-# agforge's root has the same parent as agautolab's, so the credentials file
-# both agents share is reached by the same expression.
-PLANE_ENV = AGFORGE_ROOT.parent / ".local" / "plane-credentials.env"
+# `AGAG_PLANE_ENV`, else `.local/plane-credentials.env` beside this agent
+# (the shared pj-agdev file is symlinked there).
+PLANE_ENV = credentials_path(AGFORGE_ROOT)
 
 EXTERNAL_SOURCE = "agforge"
 PROJECT_CHANNEL_PREFIX = "pj-"

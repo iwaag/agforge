@@ -19,7 +19,6 @@ from .role_run import (
     AGENTS_CONFIG,
     AGENTS_LOCAL_CONFIG,
     AGFORGE_ROOT,
-    CLAUDE_ALLOWED_TOOLS,
     resolve_agforge_role,
     tool_environment,
 )
@@ -86,7 +85,7 @@ def compose_charter(
 
 
 def build_argv(agent: ResolvedAgent) -> list[str]:
-    return shared_build_argv(agent, allowed_tools=" ".join(CLAUDE_ALLOWED_TOOLS))
+    return shared_build_argv(agent, allowed_tools=agent.allowed_tools)
 
 
 def _agforge_failure(agent: ResolvedAgent, failure: str) -> str:
@@ -117,7 +116,7 @@ def run_agent(
         charter,
         cwd=AGFORGE_ROOT,
         timeout=timeout,
-        allowed_tools=" ".join(CLAUDE_ALLOWED_TOOLS),
+        allowed_tools=agent.allowed_tools,
         transcript_path=transcript_path,
         output_tail_chars=OUTPUT_TAIL_CHARS,
     )

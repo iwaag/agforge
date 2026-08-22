@@ -1,3 +1,5 @@
+from agag import agent as skeleton
+
 from agforge import intro
 
 
@@ -13,8 +15,8 @@ def test_main_posts_the_committed_markdown_to_the_shared_board(monkeypatch):
         def send_to_channel(self, channel, topic, text):
             sent.append((channel, topic, text))
 
-    monkeypatch.setattr(intro.ZulipClient, "from_env", lambda path: Client())
-    monkeypatch.setattr(intro, "instance_name", lambda: "agforge-agstudio1")
+    monkeypatch.setattr(skeleton.ZulipClient, "from_env", lambda path: Client())
+    monkeypatch.setenv(intro.SPEC.instance_env_var, "agforge-agstudio1")
 
     intro.main()
 

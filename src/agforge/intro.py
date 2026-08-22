@@ -1,14 +1,16 @@
-"""Post this agforge instance's fixed introduction to the shared agents board."""
+"""Post this agforge instance's introduction to the shared agents board.
+
+`uv run python -m agforge.intro` appends `params/intro.md` to `#agents`
+under `intro-<instance>`; the mechanics are `agag.agent.intro_main`.
+"""
 
 from __future__ import annotations
 
-from agag.intro import AGENTS_CHANNEL, intro_topic, post_intro
-from agag.zulip import ZulipClient
+from agag.intro import AGENTS_CHANNEL, intro_topic
 
-from .instance import AGFORGE_ROOT, instance_name
-from .zulip_listener import ZULIP_ENV
+from .instance import SPEC, instance_name
 
-INTRO_PATH = AGFORGE_ROOT / "params" / "intro.md"
+INTRO_PATH = SPEC.intro_path
 
 __all__ = ["AGENTS_CHANNEL", "INTRO_PATH", "main", "topic"]
 
@@ -18,9 +20,9 @@ def topic() -> str:
 
 
 def main() -> None:
-    """Append the current introduction to #agents for this instance."""
-    client = ZulipClient.from_env(ZULIP_ENV)
-    post_intro(client, instance=instance_name(), intro_path=INTRO_PATH, root=AGFORGE_ROOT)
+    from agag.agent import intro_main
+
+    intro_main(SPEC)
 
 
 if __name__ == "__main__":

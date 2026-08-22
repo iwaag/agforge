@@ -1,4 +1,4 @@
-schema = "ag.agent-config.v1"
+schema = "ag.agent-config.v2"
 project = "agforge"
 
 [models."ollama/qwen3.6:35b-a3b-coding-nvfp4"]
@@ -17,10 +17,36 @@ model = "anthropic/claude-sonnet-5"
 harness = "fake"
 model = "ollama/qwen3.6:35b-a3b-coding-nvfp4"
 
+# The front reads and writes text — and runs `agforge toolsets --list`,
+# which its guide tells it to do. `agentchat` is what the entrance serving
+# reads the board with. Without a grant claude_code sits on a permission
+# prompt until the timeout (ag.agent-config.v2 makes the grant part of the role).
 [roles.front]
 profile = "sonnet"
 requires = []
+allowed_tools = "Read,Write,Edit,Glob,Grep,Bash(agforge:*),Bash(agentchat:*)"
 
+# The generator's grant: image/audio tooling, the shell verbs around it, and
+# file access inside its workspace. `agforge` and `generate.sh` are reached
+# through PATH, so the bare name is what the toolsets name and what is
+# allowed here.
 [roles.generator]
 profile = "sonnet"
 requires = []
+allowed_tools = [
+    "Bash(agforge:*)",
+    "Bash(generate.sh:*)", "Bash(scripts/generate.sh:*)",
+    "Bash(./scripts/generate.sh:*)",
+    "Bash(sh scripts/generate.sh:*)", "Bash(uv:*)", "Bash(python3:*)",
+    "Bash(pip:*)", "Bash(curl:*)", "Bash(sips:*)", "Bash(magick:*)",
+    "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(file:*)", "Bash(ls:*)",
+    "Bash(pwd:*)", "Bash(cd:*)", "Bash(mkdir:*)", "Bash(cp:*)",
+    "Bash(mv:*)", "Bash(rm:*)", "Bash(cat:*)", "Bash(head:*)",
+    "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(rg:*)",
+    "Bash(find:*)", "Bash(sed:*)", "Bash(awk:*)", "Bash(echo:*)",
+    "Bash(printf:*)", "Bash(jq:*)", "Bash(date:*)", "Bash(env:*)",
+    "Bash(which:*)", "Bash(mc:*)", "Bash(git status:*)",
+    "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
+    "Bash(acestudio-cli:*)",
+    "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
+]
