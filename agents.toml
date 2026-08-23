@@ -1,13 +1,13 @@
 schema = "ag.agent-config.v2"
 project = "agforge"
 
-[models."ollama/qwen3.6:35b-a3b-coding-nvfp4"]
+[models."ollama/qwen3.8:27b-mxfp8"]
 
 [models."anthropic/claude-sonnet-5"]
 
 [profiles.local]
 harness = "agcode"
-model = "ollama/qwen3.6:35b-a3b-coding-nvfp4"
+model = "ollama/qwen3.8:27b-mxfp8"
 
 [profiles.sonnet]
 harness = "claude_code"
@@ -15,7 +15,7 @@ model = "anthropic/claude-sonnet-5"
 
 [profiles.stub]
 harness = "fake"
-model = "ollama/qwen3.6:35b-a3b-coding-nvfp4"
+model = "ollama/qwen3.8:27b-mxfp8"
 
 # The front reads and writes text — and runs `agforge toolsets --list`,
 # which its guide tells it to do. `agentchat` is what the entrance serving
