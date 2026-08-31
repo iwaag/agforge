@@ -6,9 +6,11 @@ Put all final products inside "result/" folder.
 Put all intermediate products inside "intermediate/" folder.
 If failed, create empty "failure.flag" file.
 
-When a ComfyUI generation takes minutes, do not wait for it. Submit it, run
-`comfynotify watch <prompt_id>` (`--help` explains the tool), record in your
-report what is pending and what to do with its result, then finish. The
-notifier will post into this topic and call you back — two lines naming the
-state and the `prompt_id`; read `GET /history/<prompt_id>` yourself for the
-outputs.
+When a ComfyUI generation takes minutes, do not wait for it. Submit it, post
+`@**Comfy Notifier** watch <prompt_id>` **in this topic** as a normal message,
+record in your report what is pending and what to do with its result, then
+finish. The notifier reacts to your command, and posts back here when the job
+ends — two lines naming the state and the `prompt_id`; read
+`GET /history/<prompt_id>` yourself for the outputs. Public-channel topics
+only. When *quoting* the command rather than issuing it, put it in a code
+fence.
