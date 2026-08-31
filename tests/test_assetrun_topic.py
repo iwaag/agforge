@@ -448,6 +448,37 @@ def test_the_next_run_collects_the_outputs_and_closes_the_work(monkeypatch, tmp_
     assert not (ws(tmp_path) / assetrun_topic.WATCHING_FILE).exists()
 
 
+def test_the_requester_survives_the_wait_and_the_notifier_is_never_named(monkeypatch, tmp_path):
+    """The run that collects the outputs is woken by the *notifier's*
+    callback, so the last voice in the topic is a bot that cannot want
+    anything. Delivering to it names a machine and leaves the person who
+    asked un-served — which is what happened the first time this path ran."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad-5f47", "note": "calm piano loop"})
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+    watching = json.loads((ws(tmp_path) / assetrun_topic.WATCHING_FILE).read_text())
+    assert watching["trigger"] == "@**Developer**"
+
+    # The collecting run: the notifier spoke last, and the guide has that run
+    # delete watching.json before the delivery is composed.
+    def collecting(workspace):
+        (workspace / "result" / "loop.mp3").write_text("x")
+        (workspace / assetrun_topic.WATCHING_FILE).unlink()
+        return "collected"
+
+    calls.clear()
+    wire(monkeypatch, tmp_path, calls)
+    monkeypatch.setattr(assetrun_topic, "run_generator", collecting)
+    monkeypatch.setattr(
+        assetrun_topic, "trigger_mention", lambda context: "@**Comfy Notifier**")
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+
+    origin_post = next(c for c in calls if c[0] == "write" and c[1] == ORIGIN_TOPIC)
+    assert origin_post[2].startswith("@**Developer**")
+    assert "Comfy Notifier" not in origin_post[2]
+
+
 def test_a_run_that_queued_and_then_failed_is_a_failure_not_a_wait(monkeypatch, tmp_path):
     """`failure.flag` wins: a job may have been queued before the run knew it
     could not finish, and waiting for a notifier that will report a job

@@ -127,6 +127,7 @@ __all__ = [
     "handle_assetrun",
     "pending_watch",
     "prepare_workspace",
+    "remembered_trigger",
     "result_files",
     "start_watching",
     "watch_line",
@@ -229,6 +230,9 @@ def serve(context) -> TopicResult:
         format_chatlog(context.history, context.self_id, drop=is_ack), encoding="utf-8"
     )
 
+    # Read before the run: the guide has a collecting run delete this file.
+    waiting_for = remembered_trigger(workspace)
+
     context.step = "generator run"
     answer = run_generator(workspace)
     # The run exiting zero is not the whole verdict: the guide tells the
@@ -245,7 +249,7 @@ def serve(context) -> TopicResult:
         # and its callback will land here and trigger the next run.
         context.step = "handing the job to the notifier"
         prompt_id, note = pending
-        start_watching(workspace)
+        start_watching(workspace, trigger_mention(context))
         sections.append(watch_line(prompt_id, note))
         sections.append(
             f"queued as `{prompt_id}` and left with the notifier; this Work "
@@ -280,7 +284,7 @@ def serve(context) -> TopicResult:
         delivery = f"{FAILED_PREFIX}\n\n{delivery}"
 
     context.step = "origin delivery"
-    sections.append(deliver_to_origin(context, work, delivery))
+    sections.append(deliver_to_origin(context, work, delivery, waiting_for))
 
     context.step = "reporting to plane"
     # `success=False` leaves the Work in its unstarted state, so it stays
@@ -334,9 +338,39 @@ def pending_watch(workspace: Path) -> tuple[str, str] | None:
     return prompt_id, " ".join(str(pending.get("note") or "").split())
 
 
-def start_watching(workspace: Path) -> None:
-    """Consume `pending.json` — the watch has been asked for exactly once."""
-    (workspace / PENDING_FILE).replace(workspace / WATCHING_FILE)
+def start_watching(workspace: Path, trigger: str = "") -> None:
+    """Consume `pending.json`, remembering who is waiting for this job.
+
+    The watch is asked for exactly once — and `trigger` is carried across the
+    gap because the requester is about to become unreadable. The run that
+    collects the outputs is triggered by the *notifier's* callback, so the
+    last voice in the topic is a bot that cannot want anything; delivering to
+    it names a machine and leaves the person who asked un-served. Measured
+    the first time this path ran end to end.
+    """
+    pending = workspace / PENDING_FILE
+    if trigger:
+        try:
+            body = json.loads(pending.read_text(encoding="utf-8"))
+            body["trigger"] = trigger
+            pending.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n",
+                               encoding="utf-8")
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass  # the rename matters; the courtesy of a name does not
+    pending.replace(workspace / WATCHING_FILE)
+
+
+def remembered_trigger(workspace: Path) -> str:
+    """Who asked for the job this run is collecting, if it is collecting one.
+
+    Read before the generator runs, because the guide has that run delete
+    `watching.json` once the outputs are in.
+    """
+    try:
+        watching = json.loads((workspace / WATCHING_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str((watching or {}).get("trigger") or "").strip()
 
 
 def watch_line(prompt_id: str, note: str) -> str:
@@ -413,7 +447,7 @@ def trigger_mention(context) -> str:
     return ""
 
 
-def deliver_to_origin(context, work: Work, delivery: str) -> str:
+def deliver_to_origin(context, work: Work, delivery: str, mention: str = "") -> str:
     """Post the delivery into the `assetplan-` topic, naming who triggered it.
 
     The trigger came from somewhere, and whoever made it is waiting in their
@@ -421,6 +455,10 @@ def deliver_to_origin(context, work: Work, delivery: str) -> str:
     participant of a topic is served only when a post names it, so this is
     the thing that gives them their turn back — which is exactly why it has
     to be the *trigger* and not merely the last voice in the room.
+
+    `mention` overrides the reading when the trigger is older than this run:
+    a job left with the notifier is collected by a run the *notifier* woke,
+    and a bot cannot be the requester.
 
     Said either way — the assetrun summary must survive everything, including
     a dead origin channel. The origin `assetplan-` topic may already be
@@ -431,7 +469,7 @@ def deliver_to_origin(context, work: Work, delivery: str) -> str:
     if origin is None:
         return f"no origin topic recorded; the result stays here:\n\n{delivery}"
     channel, topic = origin
-    trigger = trigger_mention(context)
+    trigger = mention or trigger_mention(context)
     body = f"{trigger}\n\n{delivery}" if trigger else delivery
     try:
         topic_write(topic, body, channel=channel, client=context.client)
