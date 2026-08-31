@@ -9,6 +9,8 @@ overwrite-in-place, no dirty check), the delivery to both topics, and
 `dispatch`'s routing. Nothing asserts what an agent said.
 """
 
+import json
+
 import pytest
 from agag import topics
 
@@ -69,7 +71,7 @@ class Client:
 
 
 def wire(monkeypatch, tmp_path, calls, *, work=WORK, answer="made it",
-         result_writes=(), fails=False):
+         result_writes=(), fails=False, pending=None):
     monkeypatch.setattr(assetrun_topic, "AGENTWS_ROOT", tmp_path / "agentws")
     # A test-owned toolset library: nothing here depends on which toolsets
     # the repository happens to ship.
@@ -94,6 +96,8 @@ def wire(monkeypatch, tmp_path, calls, *, work=WORK, answer="made it",
             (workspace / "result" / name).write_text(body)
         if fails:
             (workspace / assetrun_topic.FAILURE_FLAG).write_text("")
+        if pending is not None:
+            (workspace / assetrun_topic.PENDING_FILE).write_text(json.dumps(pending))
         return answer
 
     monkeypatch.setattr(assetrun_topic, "run_generator", generator_run)
@@ -406,6 +410,67 @@ def test_a_leftover_flag_does_not_fail_the_next_run(monkeypatch, tmp_path):
     assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
     assert ("report", "p-free", "issue-1", "made it", True) in calls
     assert not (ws(tmp_path) / assetrun_topic.FAILURE_FLAG).exists()
+
+
+def test_a_queued_job_is_handed_to_the_notifier_and_the_work_stays_open(monkeypatch, tmp_path):
+    """The generator cannot post — it has no `agentchat` and no Zulip
+    credentials by design — so `pending.json` is how it says "queued". This
+    module does the talking: the reply *is* the notifier command, nothing is
+    delivered, and the Work is not closed."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad-5f47", "note": "apple relay test"})
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+
+    reply = calls[-1][2]
+    assert "@**Comfy Notifier** watch b09133ad-5f47 apple relay test" in reply
+    assert "```" not in reply  # a fenced mention is not a mention
+    assert not any(c[0] == "report" for c in calls)   # the Work stays open
+    assert not any(c[0] == "upload" for c in calls)   # nothing is delivered
+    assert not any(c[0] == "write" and c[1] == ORIGIN_TOPIC for c in calls)
+    # Consumed, so a second trigger cannot ask for the same watch again.
+    assert not (ws(tmp_path) / assetrun_topic.PENDING_FILE).exists()
+    assert (ws(tmp_path) / assetrun_topic.WATCHING_FILE).exists()
+
+
+def test_the_next_run_collects_the_outputs_and_closes_the_work(monkeypatch, tmp_path):
+    """The notifier's callback is itself a post in this topic, so it triggers
+    the run that finishes the job."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad-5f47", "note": ""})
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+
+    wire(monkeypatch, tmp_path, calls, result_writes=[("apple.png", "x")])
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+    assert any(c[0] == "report" and c[4] is True for c in calls)
+    assert any(c[0] == "upload" for c in calls)
+    assert not (ws(tmp_path) / assetrun_topic.WATCHING_FILE).exists()
+
+
+def test_a_run_that_queued_and_then_failed_is_a_failure_not_a_wait(monkeypatch, tmp_path):
+    """`failure.flag` wins: a job may have been queued before the run knew it
+    could not finish, and waiting for a notifier that will report a job
+    nobody wants is worse than saying so now."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls, fails=True,
+         pending={"prompt_id": "b09133ad-5f47", "note": ""})
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+    assert any(c[0] == "report" and c[4] is False for c in calls)
+    assert not any("@**Comfy Notifier**" in c[2] for c in calls if c[0] == "write")
+
+
+def test_a_leftover_pending_file_does_not_re_watch_the_next_run(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad-5f47", "note": ""})
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+    # Hand-written leftover from some earlier run.
+    (ws(tmp_path) / assetrun_topic.PENDING_FILE).write_text('{"prompt_id": "stale"}')
+
+    wire(monkeypatch, tmp_path, calls, result_writes=[("apple.png", "x")])
+    assetrun_topic.handle_assetrun(Client(calls), CHANNEL, TOPIC)
+    assert not any("stale" in c[2] for c in calls if c[0] == "write")
 
 
 # --- (c) an exception mid-way names its step --------------------------------

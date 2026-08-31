@@ -6,11 +6,23 @@ Put all final products inside "result/" folder.
 Put all intermediate products inside "intermediate/" folder.
 If failed, create empty "failure.flag" file.
 
-When a ComfyUI generation takes minutes, do not wait for it. Submit it, post
-`@**Comfy Notifier** watch <prompt_id>` **in this topic** as a normal message,
-record in your report what is pending and what to do with its result, then
-finish. The notifier reacts to your command, and posts back here when the job
-ends — two lines naming the state and the `prompt_id`; read
-`GET /history/<prompt_id>` yourself for the outputs. Public-channel topics
-only. When *quoting* the command rather than issuing it, put it in a code
-fence.
+A video or music generation takes minutes. Do not sit through it and do not
+poll: `agforge video submit` and `agforge music submit` queue the same job
+`generate` runs and print its `prompt_id` straight away. Write
+
+    {"prompt_id": "<the id>", "note": "<a few words naming this job>"}
+
+into "pending.json", say in your report what is pending and what should
+happen to it, and finish. You will be run again when the job ends, with
+"pending.json" renamed to "watching.json" and the outcome in "chatlog.md".
+Then read the id from "watching.json", run `agforge comfy fetch <prompt_id>
+--into result` to collect the files, delete "watching.json", and finish
+normally — that run is the one that delivers.
+
+Do not post the notifier line yourself; you have no chat tool and do not need
+one. Writing "pending.json" is how you ask for the wait, and it is asked for
+once — leave "watching.json" alone except to read it and, when the outputs
+are in, delete it.
+
+`agforge image generate` is not part of this: it returns in seconds and hands
+you the finished image, so use it directly.

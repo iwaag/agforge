@@ -9,6 +9,9 @@ The subcommands are the vocabulary the toolset documents in
     agforge image generate "…"    SwarmUI  → presigned URL on the last line
     agforge video generate --prompt "…"   ComfyUI → the same contract
     agforge music generate --prompt "…"   ComfyUI → the same contract
+    agforge video submit   --prompt "…"   queue it, print the prompt_id, return
+    agforge music submit   --prompt "…"   queue it, print the prompt_id, return
+    agforge comfy fetch <prompt_id>       download a finished job's outputs
 
 `--help` on any of them is the usage information (Tool Giving); no guide
 text repeats it.
@@ -18,7 +21,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import comfy_music, comfy_video, generate, toolsets as toolsets_module
+from . import comfy_async, comfy_music, comfy_video, generate, toolsets as toolsets_module
 
 __all__ = ["build_parser", "main"]
 
@@ -58,6 +61,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     comfy_video.add_arguments(video_generate)
     video_generate.set_defaults(run=_run_video_generate, parser=video_generate)
+    video_submit = video_actions.add_parser(
+        "submit", help="queue one video and print its ComfyUI prompt_id",
+        description="Queue the same video job `generate` runs, print its "
+                    "ComfyUI prompt_id, and return immediately without "
+                    "waiting for the render. Hand that id to the notifier "
+                    "and let your run end; `agforge comfy fetch <prompt_id>` "
+                    "collects the outputs afterwards.",
+    )
+    comfy_async.add_submit_arguments(video_submit, "what the video should show")
+    video_submit.set_defaults(run=_run_video_submit, parser=video_submit)
 
     music = commands.add_parser("music", help="music generation")
     music_actions = music.add_subparsers(dest="action", required=True)
@@ -71,6 +84,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     comfy_music.add_arguments(music_generate)
     music_generate.set_defaults(run=_run_music_generate, parser=music_generate)
+    music_submit = music_actions.add_parser(
+        "submit", help="queue one track and print its ComfyUI prompt_id",
+        description="Queue the same music job `generate` runs, print its "
+                    "ComfyUI prompt_id, and return immediately without "
+                    "waiting for the render. Hand that id to the notifier "
+                    "and let your run end; `agforge comfy fetch <prompt_id>` "
+                    "collects the outputs afterwards.",
+    )
+    comfy_async.add_submit_arguments(music_submit, "what the music should sound like")
+    music_submit.set_defaults(run=_run_music_submit, parser=music_submit)
+
+    comfy = commands.add_parser("comfy", help="a queued ComfyUI job")
+    comfy_actions = comfy.add_subparsers(dest="action", required=True)
+    comfy_fetch = comfy_actions.add_parser(
+        "fetch", help="download the outputs of a finished job",
+        description="Download every output file of a finished ComfyUI job "
+                    "into a directory, keeping ComfyUI's own filenames, and "
+                    "print the local paths. It never waits: ask for a job "
+                    "the notifier has already reported as finished.",
+    )
+    comfy_async.add_fetch_arguments(comfy_fetch)
+    comfy_fetch.set_defaults(run=_run_comfy_fetch, parser=comfy_fetch)
 
     return parser
 
@@ -94,6 +129,18 @@ def _run_video_generate(args: argparse.Namespace) -> None:
 
 def _run_music_generate(args: argparse.Namespace) -> None:
     comfy_music.run(args)
+
+
+def _run_video_submit(args: argparse.Namespace) -> None:
+    comfy_async.run_submit("video", args)
+
+
+def _run_music_submit(args: argparse.Namespace) -> None:
+    comfy_async.run_submit("music", args)
+
+
+def _run_comfy_fetch(args: argparse.Namespace) -> None:
+    comfy_async.run_fetch(args)
 
 
 def main(argv: list[str] | None = None) -> None:

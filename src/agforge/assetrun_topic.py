@@ -27,6 +27,15 @@ The result goes to **both** topics: the `assetrun-` one, through
 `serve_topic`'s ordinary reply, and the `assetplan-` one the root note names,
 where the requester was talking.
 
+A run may also end **without a result and without having failed**: it queued
+a ComfyUI job with `agforge video submit` and left `pending.json` naming the
+`prompt_id`. Then this module does the talking the generator cannot do —
+it posts `@**Comfy Notifier** watch <prompt_id>` as its reply, delivers
+nothing, and leaves the Work open. The notifier's callback is itself a post
+in this topic, so it triggers the next run, which finds `watching.json` and
+collects the outputs. That hand-off is why the generator never needs a Zulip
+voice of its own (`episodes/zulip_command`, the agforge follow-up).
+
 **Only the delivery names the trigger** (`agent_standardize` p9). Being named
 is how a requester's next turn happens at all, so naming them in both places
 gives them two — p8's proof watched Front tell the developer "done" twice for
@@ -38,6 +47,7 @@ record, and `handoff=False` keeps it from handing anybody a turn.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -71,6 +81,12 @@ TOOLS_DIR = "tools"
 # saying so itself when the harness saw nothing wrong.
 FAILURE_FLAG = "failure.flag"
 
+# The generator's "I queued something and stopped": `{"prompt_id", "note"}`.
+# It is renamed to WATCHING_FILE the moment the watch has been asked for, so
+# a job is never watched twice, and removed once its outputs are in.
+PENDING_FILE = "pending.json"
+WATCHING_FILE = "watching.json"
+
 # Real work, not a planning pass: autolab's work run uses 1200 s and the
 # assetplan-flow generator 900 s; this sits at the top of that range.
 ASSETRUN_TIMEOUT_SECONDS = 1200
@@ -101,14 +117,19 @@ __all__ = [
     "EMPTY_REPLY",
     "FAILED_PREFIX",
     "FAILURE_FLAG",
+    "PENDING_FILE",
     "S3_KEY_MARKER",
+    "WATCHING_FILE",
     "UNANCHORED_REPLY",
     "ListenerError",
     "deliver_to_origin",
     "trigger_mention",
     "handle_assetrun",
+    "pending_watch",
     "prepare_workspace",
     "result_files",
+    "start_watching",
+    "watch_line",
     "run_generator",
     "s3_key_footer",
     "serve",
@@ -142,7 +163,9 @@ def prepare_workspace(work: Work) -> Path:
     `intermediate/` are left as they are.
 
     A leftover `failure.flag` is removed here, so a re-trigger starts clean
-    and the flag found after the run is this run's own verdict.
+    and the flag found after the run is this run's own verdict. So is a
+    leftover `pending.json`, for the same reason. `watching.json` is *kept*:
+    it is how the next run learns which job it is collecting.
     """
     workspace = workspace_dir(work.issue_id)
     workspace.mkdir(parents=True, exist_ok=True)
@@ -155,6 +178,7 @@ def prepare_workspace(work: Work) -> Path:
         toolsets.names() if requested is None else requested, workspace / TOOLS_DIR
     )
     (workspace / FAILURE_FLAG).unlink(missing_ok=True)
+    (workspace / PENDING_FILE).unlink(missing_ok=True)
     (workspace / "result").mkdir(exist_ok=True)
     (workspace / "intermediate").mkdir(exist_ok=True)
     return workspace
@@ -214,7 +238,23 @@ def serve(context) -> TopicResult:
     if not succeeded:
         sections.append(f"{FAILURE_FLAG} is present: the generator reports failure")
 
+    pending = pending_watch(workspace)
+    if pending and succeeded:
+        # Nothing to package and nothing to close: the render is still
+        # running. The reply *is* the command — the notifier reads mentions,
+        # and its callback will land here and trigger the next run.
+        context.step = "handing the job to the notifier"
+        prompt_id, note = pending
+        start_watching(workspace)
+        sections.append(watch_line(prompt_id, note))
+        sections.append(
+            f"queued as `{prompt_id}` and left with the notifier; this Work "
+            "stays open and its next run collects the outputs"
+        )
+        return TopicResult(sections)
+
     context.step = "packaging the result"
+    (workspace / WATCHING_FILE).unlink(missing_ok=True)
     files = result_files(workspace)
     comment = answer
     if files:
@@ -273,6 +313,37 @@ def handle_assetrun(client: ZulipClient, channel: str, topic: str) -> None:
         # them a second run for one delivery.
         handoff=False,
     )
+
+
+def pending_watch(workspace: Path) -> tuple[str, str] | None:
+    """`(prompt_id, note)` the run asked to have watched, or None.
+
+    The file is the generator's whole vocabulary for "I am not finished and I
+    have not failed" — it cannot say so in Zulip itself, and an empty
+    `result/` already means "a pure-text answer", so it could not be
+    overloaded to mean this.
+    """
+    path = workspace / PENDING_FILE
+    try:
+        pending = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    prompt_id = str((pending or {}).get("prompt_id") or "").strip()
+    if not prompt_id:
+        return None
+    return prompt_id, " ".join(str(pending.get("note") or "").split())
+
+
+def start_watching(workspace: Path) -> None:
+    """Consume `pending.json` — the watch has been asked for exactly once."""
+    (workspace / PENDING_FILE).replace(workspace / WATCHING_FILE)
+
+
+def watch_line(prompt_id: str, note: str) -> str:
+    """The notifier command, as a live mention. Never fenced: a mention in a
+    code fence is not a mention, and this one has to fire."""
+    line = f"@**Comfy Notifier** watch {prompt_id}"
+    return f"{line} {note}" if note else line
 
 
 def result_files(workspace: Path) -> list[Path]:

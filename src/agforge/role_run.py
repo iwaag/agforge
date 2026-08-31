@@ -42,8 +42,15 @@ def tool_environment(
     bin_dir: Path | None = None,
     scripts_dir: Path | None = None,
     base: Mapping[str, str] | None = None,
+    comfynotify_dir: Path | None = None,
 ) -> dict[str, str]:
-    """The host-local tool handover: one allowlisted value, plus PATH."""
+    """The host-local tool handover: one allowlisted value, plus PATH.
+
+    Every prepended directory is overridable, `comfynotify_dir` included —
+    it was not, and the tests that pass absent directories to prove "nothing
+    is added" had been quietly failing on any machine where the real
+    comfynotify venv exists.
+    """
     try:
         lines = env_path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -61,7 +68,7 @@ def tool_environment(
         for directory in (
             bin_dir if bin_dir is not None else LOCAL_BIN,
             scripts_dir if scripts_dir is not None else SCRIPTS_DIR,
-            COMFYNOTIFY_BIN,
+            comfynotify_dir if comfynotify_dir is not None else COMFYNOTIFY_BIN,
         )
         if directory.is_dir()
     ]

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agag import agent_config
+from agag import agcode, agent_config
 from agforge import agent_run, role_run
 
 
@@ -148,6 +148,9 @@ base_url = "http://ollama.example:11434"
         sys.executable, "-m", "agag.agcode",
         "--model", "local-model",                     # native, for the wire
         "--base-url", "http://ollama.example:11434",
+        # agcode grew a token ceiling in pyagag; the value is agag's, not
+        # agforge's, so it is read from there rather than spelled again.
+        "--max-tokens", str(agcode.DEFAULT_MAX_TOKENS),
     ]
 
 
@@ -155,7 +158,8 @@ def test_local_ace_studio_path_is_injected_without_sourcing_shell(tmp_path):
     env_file = tmp_path / "ace-studio.env"
     env_file.write_text('ACE_STUDIO_CLI="/Applications/ACE Studio.app/tool"\n')
     assert role_run.tool_environment(
-        env_file, tmp_path / "absent", tmp_path / "absent"
+        env_file, tmp_path / "absent", tmp_path / "absent",
+        comfynotify_dir=tmp_path / "absent",
     ) == {"ACE_STUDIO_CLI": "/Applications/ACE Studio.app/tool"}
 
 
@@ -163,7 +167,8 @@ def test_local_tool_environment_ignores_unrelated_keys(tmp_path):
     env_file = tmp_path / "ace-studio.env"
     env_file.write_text('SECRET="do-not-import"\n')
     assert role_run.tool_environment(
-        env_file, tmp_path / "absent", tmp_path / "absent"
+        env_file, tmp_path / "absent", tmp_path / "absent",
+        comfynotify_dir=tmp_path / "absent",
     ) == {}
 
 
