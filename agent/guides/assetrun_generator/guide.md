@@ -5,3 +5,8 @@ something more specific than the plan, and ignore it where it says nothing.
 Put all final products inside "result/" folder.
 Put all intermediate products inside "intermediate/" folder.
 If failed, create empty "failure.flag" file.
+
+When a ComfyUI generation takes minutes, do not wait for it. Submit it, run
+`comfynotify watch <prompt_id>` (`--help` explains the tool), record in your
+report what is pending and what to do with its result, then finish. The
+notifier will post into this topic and call you back.

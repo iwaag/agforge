@@ -27,11 +27,12 @@ AGENTS_LOCAL_CONFIG = _BARE_SPEC.agents_local_config
 ACE_STUDIO_ENV = AGFORGE_ROOT / ".local" / "ace-studio.env"
 LOCAL_BIN = AGFORGE_ROOT / ".local" / "bin"
 SCRIPTS_DIR = AGFORGE_ROOT / "scripts"
+COMFYNOTIFY_BIN = AGFORGE_ROOT.parent / "comfynotify" / ".venv" / "bin"
 ZULIP_ENV = _BARE_SPEC.zulip_env
 
 __all__ = [
     "ACE_STUDIO_ENV", "AGENTCHAT_ENV_VARIABLE", "AGENTS_CONFIG", "AGENTS_LOCAL_CONFIG",
-    "AGFORGE_ROOT", "SPEC", "ZULIP_ENV", "chat_environment", "load_config",
+    "AGFORGE_ROOT", "COMFYNOTIFY_BIN", "SPEC", "ZULIP_ENV", "chat_environment", "load_config",
     "resolve_agforge_role", "run_role", "tool_environment",
 ]
 
@@ -60,6 +61,7 @@ def tool_environment(
         for directory in (
             bin_dir if bin_dir is not None else LOCAL_BIN,
             scripts_dir if scripts_dir is not None else SCRIPTS_DIR,
+            COMFYNOTIFY_BIN,
         )
         if directory.is_dir()
     ]

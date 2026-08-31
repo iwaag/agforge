@@ -92,3 +92,8 @@ def test_generator_reaches_generate_sh_through_path():
     assert str(role_run.SCRIPTS_DIR) in environment["PATH"].split(":")
     assert (role_run.SCRIPTS_DIR / "generate.sh").is_file()
     assert "Bash(generate.sh:*)" in grants()["generator"]
+
+
+def test_generator_reaches_comfynotify_through_path():
+    environment = role_run.tool_environment()
+    assert str(role_run.COMFYNOTIFY_BIN) in environment["PATH"].split(":")
