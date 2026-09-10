@@ -93,6 +93,11 @@ REQUEST_PLANNED = "planned"
 REQUEST_DELIVERED = "delivered"
 REQUEST_FAILED = "failed"
 REQUEST_RETIRED = "retired"
+#: Written by the **operation room**, with the human's own credential, and
+#: never by forge. It is read back here anyway (`anchor.EXTERNAL_STATES`)
+#: because a request somebody has accepted is finished, and forge answering
+#: "where do my plans stand" must not go on calling it merely delivered.
+REQUEST_ACCEPTED = "accepted"
 
 #: A run's states. `pending` is the one that is neither: a ComfyUI job was
 #: queued and the notifier will wake the run that collects it.
@@ -109,6 +114,7 @@ __all__ = [
     "ASSETRUN_TOPIC_PREFIX",
     "HISTORY_MESSAGES",
     "POST_LIMIT",
+    "REQUEST_ACCEPTED",
     "REQUEST_DELIVERED",
     "REQUEST_FAILED",
     "REQUEST_PLANNED",

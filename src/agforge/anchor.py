@@ -65,6 +65,7 @@ NO_TOOLS = "-"
 __all__ = [
     "ASSET_TAG",
     "DOC_TAG",
+    "EXTERNAL_STATES",
     "NO_TOOLS",
     "REPLACES_TAG",
     "RESULT_TAG",
@@ -257,8 +258,30 @@ def own_tools(messages, self_id: int) -> list[str] | None:
     return _newest(messages, self_id, parse_tools)
 
 
+#: The state word somebody **other than this bot** may write. Every other
+#: state is forge reporting its own work; this one is a *person* accepting
+#: the asset, and they accept it from the operation room with their own
+#: credential. A reader that took states only from its own author would not
+#: see it at all — which is `refactor` p1 step 4's defect, met again live on
+#: forge's half in p2 step 5: the room's `accepted` landed in the request's
+#: topic and forge went on reporting the request as merely delivered.
+EXTERNAL_STATES = ("accepted",)
+
+
 def own_state(messages, self_id: int) -> str | None:
-    return _newest(messages, self_id, parse_state)
+    """The newest state note, from this bot or — for `EXTERNAL_STATES` — anybody.
+
+    Newest wins whoever wrote it, so a request accepted and then run again
+    reads as whatever happened last, and a visitor still cannot claim
+    `delivered` for work they did not do.
+    """
+    for message in reversed(list(messages)):
+        found = parse_state(message.get("content"))
+        if found is None:
+            continue
+        if message.get("sender_id") == self_id or found.strip().lower() in EXTERNAL_STATES:
+            return found
+    return None
 
 
 def own_replaces(messages, self_id: int) -> int | None:

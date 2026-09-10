@@ -280,3 +280,44 @@ def test_retire_refuses_a_conversation_that_is_not_a_request():
     client = Realm({(CHANNEL, "chit-chat"): [human("hello")]})
     with pytest.raises(record.RecordError, match="not a request of mine"):
         command.retire(client, CHANNEL, "chit-chat")
+
+
+# --- acceptance is somebody else's word -------------------------------------
+
+
+def test_the_operation_room_s_acceptance_is_visible_to_forge_s_own_reader():
+    """Found live in p2 step 5. The room accepts with the **human's**
+    credential — that is what acceptance means — and forge's reader took
+    states only from its own author, so a request a person had accepted went
+    on reading as merely `delivered` when forge surveyed its own board.
+    """
+    client = realm()
+    request = planned(client)
+    record.set_request_state(client, request, record.REQUEST_DELIVERED)
+    # The operation room, posting as the Developer.
+    client.histories[(CHANNEL, TOPIC)].append(
+        human("[selfnote][state] accepted", id=900))
+
+    found = record.read_request(client, CHANNEL, TOPIC, BOT_ID)
+
+    assert found.state == record.REQUEST_ACCEPTED
+
+
+def test_a_visitor_cannot_claim_any_other_state_for_forge_s_work():
+    client = realm()
+    request = planned(client)
+    record.set_request_state(client, request, record.REQUEST_FAILED)
+    client.histories[(CHANNEL, TOPIC)].append(
+        human("[selfnote][state] delivered", id=900))
+
+    assert record.read_request(client, CHANNEL, TOPIC, BOT_ID).state == record.REQUEST_FAILED
+
+
+def test_running_it_again_after_an_acceptance_is_the_newest_word():
+    client = realm()
+    request = planned(client)
+    client.histories[(CHANNEL, TOPIC)].append(
+        human("[selfnote][state] accepted", id=900))
+    record.set_request_state(client, request, record.REQUEST_PLANNED)
+
+    assert record.read_request(client, CHANNEL, TOPIC, BOT_ID).state == record.REQUEST_PLANNED
