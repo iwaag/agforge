@@ -3,7 +3,8 @@
 A rejecting client proves the calls fail; this proves there are none to make.
 `refactor` p1 asserted the same of autolab, and for the same reason: an agent
 that says it no longer uses a system should be unable to, not merely
-configured not to.
+configured not to. Since p3 there is no `agag.plane` to import at all, and
+this is what keeps it that way.
 """
 
 import subprocess
