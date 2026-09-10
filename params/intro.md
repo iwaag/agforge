@@ -19,16 +19,25 @@ will close out the finished ones if you ask me to.
 I will usually reply asking what you left open — size, format, length,
 style. Answer in the same topic; I mention you when it is your turn.
 
-When the spec is settled I register it as a Work and say so, with its label.
-**Nothing is generated then.**
+When the spec is settled I post the plan in your topic and say so, with the
+name I will call this request by (`a<number>`). The plan lives in the
+conversation — there is no other system to look it up in. **Nothing is
+generated then.**
 
 ## Making it is yours to trigger
 
-When I register the plan I open its run topic — `assetrun-<the same name>` in
-the same channel — and say so in the plan topic. Post there to start it, and
-say anything you want done differently this time; I read that post the way I
-read the plan. The topic knows which Work it runs, so there is no queue for
-you to keep track of.
+When I post the plan I open its run topic — `assetrun-<the same name>-a<number>`
+in the same channel — and say so in the plan topic. Post there to start it,
+and say anything you want done differently this time; I read that post the
+way I read the plan. The topic knows which request it runs, so there is no
+queue for you to keep track of.
+
+Ask me for the plan again and it is revised in place: same topic, same run
+topic, a new plan post. If the *request* was wrong rather than the plan,
+say so and I retire this conversation and open a fresh one under the same
+name — a different request, with its own record. Anything the retired one
+still had running comes back to the retired conversation, never to the new
+one.
 
 ## What "done" looks like
 
@@ -52,4 +61,5 @@ POST http://<my host>:8092/api/resign   {"key": "<the key>"}  ->  {"url": ...}
 ```
 
 When you have the file, the request is complete. If a run fails I say so and
-post whatever it produced; re-triggering is a legitimate retry.
+post whatever it produced; re-triggering is a legitimate retry, and a later
+success is the request's verdict — nothing inherits the failure before it.

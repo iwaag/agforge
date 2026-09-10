@@ -14,19 +14,13 @@ import pytest
 from agag import topics
 from agag.topics import GuideError
 
-from agforge import assetplan_topic, toolsets
-from agforge.plane import Registration
+from agforge import assetplan_topic, record, toolsets
 
-RUN_TOPIC = "assetrun-20260814-120000-abc"
-REGISTERED = Registration(
-    line="registered PA-1", project_id="p-free", issue_id="i-1",
-    title="Draw the bird", label="PA-1",
-)
+from realm import BOT_ID, HUMAN_ID, Realm
 
-BOT_ID = 13
-HUMAN_ID = 8
 CHANNEL = "FreeForge"
 TOPIC = "assetplan-20260814-120000-abc"
+STEM = "20260814-120000-abc"
 
 
 def message(sender_id=HUMAN_ID, name="Developer", content="make me a bird", id=1):
@@ -41,20 +35,36 @@ def message(sender_id=HUMAN_ID, name="Developer", content="make me a bird", id=1
     }
 
 
-class Client:
-    email = "forge-bot@example.invalid"
+class Client(Realm):
+    """The realm this request happens in, with every call recorded in order.
+
+    Since `refactor` p2 the record *is* the conversation, so the fixture has
+    to be one: `register_plan` and `open_assetrun` write posts here and read
+    them back, rather than talking to a second system a stub could stand in
+    for.
+    """
 
     def __init__(self, calls, history=None):
-        self.calls = calls
-        self.history = [message()] if history is None else history
+        super().__init__({(CHANNEL, TOPIC): list(
+            [message()] if history is None else history)})
+        self.tracker = calls
 
     def whoami(self):
-        self.calls.append(("whoami",))
-        return {"user_id": BOT_ID, "full_name": "Forge"}
+        self.tracker.append(("whoami",))
+        return super().whoami()
 
-    def topic_history(self, channel, topic, num_before):
-        self.calls.append(("history", channel, topic, num_before))
-        return self.history
+    def topic_history(self, channel, topic, num_before=50):
+        self.tracker.append(("history", channel, topic, num_before))
+        return super().topic_history(channel, topic, num_before)
+
+    def send_to_channel(self, channel, topic, content):
+        self.tracker.append(("write", topic, content))
+        return super().send_to_channel(channel, topic, content)
+
+    def run_topic(self):
+        """The one `assetrun-` topic this request opened, by name."""
+        return next(name for _, name in self.histories
+                    if name.startswith("assetrun-"))
 
 
 def written(calls):
@@ -71,9 +81,9 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
         calls.append(("write", topic, text)) or "success"
     )
     monkeypatch.setattr(topics, "topic_write", writer)
-    # `open_assetrun` posts into the run topic itself, not through the
-    # skeleton, so its own name has to be caught as well.
-    monkeypatch.setattr(assetplan_topic, "topic_write", writer)
+    # The record's own writes go through the client (`send_to_channel`), so
+    # the fixture realm records them; only the skeleton's posts come through
+    # this name.
 
     def front_run(prompt, cwd):
         calls.append(("front", prompt, cwd))
@@ -161,33 +171,34 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
         toolsets_csv="toolset-image, Images\n",
         writes=(("idea.md", "buy a GPU"), ("plan.md", "# Bird\n\nDraw it.")),
     )
-    monkeypatch.setattr(
-        assetplan_topic,
-        "register_plan",
-        lambda channel, topic, plan, tools: (
-            calls.append(("plan", plan, tools)) or REGISTERED
-        ),
-    )
-
-    assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
+    client = Client(calls)
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
 
     generator = gen_dir(tmp_path, 1, "generator")
     assert [call[0] for call in calls] == [
-        "whoami", "write", "history", "front", "write", "generator", "plan",
-        # opening the Work's own run topic: is it anchored already, then the
-        # two selfnotes and the one visible line
-        "history", "write", "write", "write",
+        "whoami", "write", "history", "front", "write", "generator",
+        # recording the plan: is this conversation anchored already, then the
+        # anchor, the plan itself, and the three notes that describe it
+        "history", "write", "write", "write", "write", "write",
+        # opening the request's own run topic: read it — twice, because a
+        # topic that comes back empty is read again under its ✔ name — then
+        # the two selfnotes and the one visible line
+        "history", "history", "write", "write", "write",
         # the handoff lookup, the reply, then the post-run re-check
         "history", "write", "history",
     ]
     assert (generator / "required_items.md").read_text() == "one bird, blue"
     assert [path.name for path in (generator / "tools").iterdir()] == ["toolset-image.md"]
     assert calls[5][1] == generator
-    # plan.md is registered, the run topic is named, idea.md is relayed
+    # The plan is recorded, the run topic is named, idea.md is relayed
     # verbatim, then the answer.
+    request = record.read_request(client, CHANNEL, TOPIC, BOT_ID)
+    assert request.plan == "# Bird\n\nDraw it."
+    assert request.tools == ["toolset-image"]
     assert written(calls)[-1] == (
-        "@**Developer**\n\nregistered PA-1\n\n"
-        f"posting in {RUN_TOPIC} starts it\n\nbuy a GPU\n\nmade it"
+        "@**Developer**\n\n"
+        f'recorded {request.label} "Bird" (toolsets: toolset-image)\n\n'
+        f"posting in {client.run_topic()} starts it\n\nbuy a GPU\n\nmade it"
     )
 
 
@@ -205,11 +216,13 @@ def test_a_plan_alone_still_reports_and_answers(monkeypatch, tmp_path):
     calls = []
     wire(monkeypatch, tmp_path, calls, writes_required=True,
          writes=(("plan.md", "# Bird\n\nDraw it."),))
-    monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: REGISTERED)
-    assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
+    client = Client(calls)
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+    request = record.read_request(client, CHANNEL, TOPIC, BOT_ID)
     assert written(calls)[-1] == (
-        "@**Developer**\n\nregistered PA-1\n\n"
-        f"posting in {RUN_TOPIC} starts it\n\nmade it"
+        "@**Developer**\n\n"
+        f'recorded {request.label} "Bird" (toolsets: none)\n\n'
+        f"posting in {client.run_topic()} starts it\n\nmade it"
     )
 
 
@@ -316,17 +329,17 @@ def test_a_generator_failure_names_its_own_step(monkeypatch, tmp_path):
     assert "failed during generator: no disk space" in calls[-1][2]
 
 
-def test_a_plane_failure_is_reported_not_swallowed(monkeypatch, tmp_path):
+def test_a_record_failure_is_reported_not_swallowed(monkeypatch, tmp_path):
     calls = []
     wire(monkeypatch, tmp_path, calls, writes_required=True,
          writes=(("plan.md", "# Bird\n\nDraw it."),))
 
-    def explode(channel, topic, plan, tools):
-        raise assetplan_topic.ListenerError("plane is down")
+    def explode(*args):
+        raise assetplan_topic.ListenerError("the realm refused the post")
 
     monkeypatch.setattr(assetplan_topic, "register_plan", explode)
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
-    assert "failed during generator: plane is down" in calls[-1][2]
+    assert "failed during generator: the realm refused the post" in calls[-1][2]
 
 
 # --- generations -----------------------------------------------------------
@@ -398,39 +411,45 @@ def test_guide_refuses_to_start_without_the_file(monkeypatch, tmp_path):
 
 def test_registering_opens_the_run_topic_with_its_two_anchors(monkeypatch, tmp_path):
     """The requester never invents an `assetrun-` name, and the topic that is
-    opened says what it runs — that is what replaced `next_work`'s guess."""
+    opened says what it runs — that is what replaced `next_work`'s guess.
+
+    Its name carries the request's anchor id, so a later request under the
+    same stem cannot merge into it (`refactor` p2).
+    """
     calls = []
     wire(monkeypatch, tmp_path, calls, writes_required=True,
          writes=(("plan.md", "# Bird\n\nDraw it."),))
-    monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: REGISTERED)
 
-    assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
+    client = Client(calls)
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
 
-    into_run_topic = [call[2] for call in calls if call[0] == "write" and call[1] == RUN_TOPIC]
+    request = record.read_request(client, CHANNEL, TOPIC, BOT_ID)
+    run_topic = client.run_topic()
+    assert run_topic == f"assetrun-{STEM}-{request.label}"
+    into_run_topic = [c[2] for c in calls if c[0] == "write" and c[1] == run_topic]
     assert into_run_topic[0] == f"[selfnote][rootchat] {CHANNEL}/{TOPIC}"
-    assert into_run_topic[1] == "[selfnote][work] p-free/i-1"
+    assert into_run_topic[1] == f"[selfnote][assetrun] {request.anchor_id}"
     # Everything a reader ever sees of it is the third line.
     assert len(into_run_topic) == 3
-    assert 'PA-1 "Draw the bird"' in into_run_topic[2]
+    assert f'{request.label} "Bird"' in into_run_topic[2]
     assert TOPIC in into_run_topic[2]
     assert "selfnote" not in into_run_topic[2]
 
 
 def test_a_second_generation_finds_the_run_topic_already_anchored(monkeypatch, tmp_path):
-    """One Work, one run topic, however far the generation number climbs."""
+    """One request, one run topic, however far the generation number climbs."""
     calls = []
     wire(monkeypatch, tmp_path, calls, writes_required=True,
          writes=(("plan.md", "# Bird\n\nDraw it."),))
-    monkeypatch.setattr(assetplan_topic, "register_plan", lambda *a: REGISTERED)
+    client = Client(calls)
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+    run_topic = client.run_topic()
+    request = record.read_request(client, CHANNEL, TOPIC, BOT_ID)
+    calls.clear()
 
-    class Anchored(Client):
-        def topic_history(self, channel, topic, num_before):
-            self.calls.append(("history", channel, topic, num_before))
-            if topic == RUN_TOPIC:
-                return [message(BOT_ID, "Forge", "[selfnote][work] p-free/i-1", 2)]
-            return self.history
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
 
-    assetplan_topic.handle_topic(Anchored(calls), CHANNEL, TOPIC)
-
-    assert [call for call in calls if call[0] == "write" and call[1] == RUN_TOPIC] == []
-    assert f"posting in {RUN_TOPIC} starts it" in written(calls)[-1]
+    assert [c for c in calls if c[0] == "write" and c[1] == run_topic] == []
+    assert f"posting in {run_topic} starts it" in written(calls)[-1]
+    # A re-plan is the same request with a new document, not a second one.
+    assert record.read_request(client, CHANNEL, TOPIC, BOT_ID).anchor_id == request.anchor_id

@@ -263,9 +263,14 @@ def test_normalized_run_record_uses_canonical_identity(agent):
         "provider": "ollama",
         "model": "ollama/test-model",
         "duration_ms": record["duration_ms"],
+        # When it ran, beside how long it took: pyagag records both since a
+        # cost read has to place a run in a usage window, not only measure it.
+        "started_at": record["started_at"],
+        "ended_at": record["ended_at"],
         "transcript": str(agent.transcript("face0000face0000")),
         "outcome": "done",
     }
+    assert record["ended_at"] >= record["started_at"]
     assert "backend" not in record
 
 

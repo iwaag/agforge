@@ -40,12 +40,21 @@ def test_the_guide_names_no_other_agents_routing():
         assert foreign not in text
 
 
+class Whoami:
+    """The one read the shared entrance makes of the client before serving:
+    the Zulip *full name* this instance is mentioned by, which is what an
+    execution-option command has to be addressed to."""
+
+    def whoami(self):
+        return {"user_id": 13, "full_name": "Forge"}
+
+
 def test_handle_entrance_serves_through_the_shared_skeleton(monkeypatch):
     seen = []
     monkeypatch.setattr(
         shared, "serve_topic",
         lambda client, channel, topic, handler, **kw: seen.append((channel, topic, kw)),
     )
-    entrance_topic.handle_entrance(object(), CHANNEL, "question")
+    entrance_topic.handle_entrance(Whoami(), CHANNEL, "question")
     assert seen[0][:2] == (CHANNEL, "question")
     assert seen[0][2]["ack_text"] == shared.SWEEP_ACK

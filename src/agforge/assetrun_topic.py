@@ -1,4 +1,4 @@
-"""Execute the Work an `assetrun-` topic was opened for, when somebody posts.
+"""Execute the request an `assetrun-` topic was opened for, when somebody posts.
 
 autolab's `workrun-` shape, on agforge's vocabulary. Until
 `agent_standardize` p8 this topic was a bare button: the chatlog was never
@@ -6,32 +6,46 @@ read, and any post fired whichever eligible Work `works.next_work` happened
 to pick, which is why the introduction had to ask the requester for "one
 trigger, one Work — let the delivery land before the next one". That burden
 is gone. The topic is opened by the assetplan flow when it registers the
-plan, and it carries two selfnotes (`anchor.py`) saying which Work it runs
+plan, and it carries two selfnotes (`anchor.py`) saying which request it runs
 and which `assetplan-` conversation it belongs to. A trigger is answered by
 reading the topic.
+
+Since `refactor` p2 the request it names is a **message id**, not a Plane
+issue, and the plan and the toolset selection are read out of that request's
+own conversation (`record.py`). Two things follow that a name could not give:
+the delivery goes home by id, so it follows a rename, a resolve or a
+retirement and is *absent* when the origin was deleted; and a replacement
+opened under the same stem is a different request with a different run topic,
+so it can neither collect this one's job nor receive its result.
 
 So the chatlog is real input now: whoever posts says what they want done, the
 same way a `workrun-` post does, and the generator gets it beside `plan.md`.
 
-The workspace is `.local/agentws/<work id>/generator/` — per Work, not per
-topic, and never deleted. A re-trigger rebuilds `plan.md`, `chatlog.md` and
-`tools/` from the Work and the topic, and leaves `result/`/`intermediate/` as
-they are; there is no dirty check on purpose (the braindump drops autolab's
-create/delete dance).
+The workspace is `.local/agentws/<run label>/generator/` — per run topic, not
+per request and not per attempt, and never deleted. A re-trigger rebuilds
+`plan.md`, `chatlog.md` and `tools/` from the record and the topic, and leaves
+`result/`/`intermediate/` as they are; there is no dirty check on purpose (the
+braindump drops autolab's create/delete dance).
 
-`tools/` is what the Work's `[TOOLS]` description footer names — the
-toolsets the create flow planned it with. A Work without that footer is
-hand-made, or predates this phase, and gets the whole library.
+**Except while a job is pending.** A run that is collecting outputs
+(`watching.json` is there) keeps the `plan.md` and `tools/` the attempt was
+submitted with, whatever the request says now: the job in ComfyUI was queued
+against *that* plan, and re-planning meanwhile must not make the collecting
+run answer a question the outputs were never for.
+
+`tools/` is what the request's `[selfnote][tools]` note names. A request with
+no such note is hand-made, or predates this phase, and gets the whole library
+— `[]` is a recorded selection of none and is not the same answer.
 
 The result goes to **both** topics: the `assetrun-` one, through
-`serve_topic`'s ordinary reply, and the `assetplan-` one the root note names,
-where the requester was talking.
+`serve_topic`'s ordinary reply, and the `assetplan-` one the request anchor
+resolves to, where the requester was talking.
 
 A run may also end **without a result and without having failed**: it queued
 a ComfyUI job with `agforge video submit` and left `pending.json` naming the
 `prompt_id`. Then this module does the talking the generator cannot do —
 it posts `@**Comfy Notifier** watch <prompt_id>` as its reply, delivers
-nothing, and leaves the Work open. The notifier's callback is itself a post
+nothing, and records the run `pending`. The notifier's callback is itself a post
 in this topic, so it triggers the next run, which finds `watching.json` and
 collects the outputs. That hand-off is why the generator never needs a Zulip
 voice of its own (`episodes/zulip_command`, the agforge follow-up).
@@ -51,7 +65,6 @@ import json
 import shutil
 from pathlib import Path
 
-from agag.plane import compose_document, description_html
 from agag.topics import (
     TopicResult,
     chatlog_path,
@@ -61,13 +74,26 @@ from agag.topics import (
     serve_topic,
 )
 from agag.selfnote import is_selfnote
-from agag.zulip import ZulipClient, log, topic_write
+from agag.zulip import ZulipClient, live_topic_name, log, topic_write
 
 from . import generate, toolsets
-from .anchor import own_rootchat, own_work
-from .plane import split_tools_footer
+from .record import (
+    REQUEST_DELIVERED,
+    REQUEST_FAILED,
+    RUN_DELIVERED,
+    RUN_FAILED,
+    RUN_PENDING,
+    RecordError,
+    Request,
+    Run,
+    read_run,
+    record_result,
+    request_label,
+    request_of_run,
+    set_request_state,
+    set_run_state,
+)
 from .role_run import AGFORGE_ROOT, run_role
-from .works import Work, report_work, work_by_id
 from .zulip_chat import ACK_PREFIX, SWEEP_ACK
 
 AGENTWS_ROOT = AGFORGE_ROOT / ".local" / "agentws"
@@ -93,7 +119,7 @@ ASSETRUN_TIMEOUT_SECONDS = 1200
 
 # A topic nobody anchored. Not an error and not a guess: since p8 an
 # `assetrun-` topic is opened by the plan that owns it, so one that says
-# nothing about itself is somebody's hand-made name and has no Work to run.
+# nothing about itself is somebody's hand-made name and has nothing to run.
 UNANCHORED_REPLY = (
     "This topic is not the run topic of any plan of mine, so there is nothing "
     "here to execute. Open an `assetplan-…` topic to plan an asset; I open its "
@@ -104,12 +130,12 @@ EMPTY_REPLY = "There is nothing in this topic to answer yet."
 
 FAILED_PREFIX = "the run reported failure; what it produced follows"
 
-# The durable half of a delivery, on its own last line — the same shape as the
-# `[TOOLS]` footer `plane.py` already puts in a description. A presigned URL
-# dies after `generate.DEFAULT_TTL_MINUTES`; the object behind it does not, so
+# The durable half of a delivery, on its own last line. A presigned URL dies
+# after `generate.DEFAULT_TTL_MINUTES`; the object behind it does not, so
 # whoever reads this later re-signs the key through `POST /api/resign` instead
-# of finding an expired link. Carried by both the delivery post and the Plane
-# comment, because a consumer may only be looking at one of them.
+# of finding an expired link. The same key is written as a `[selfnote][result]`
+# note in both conversations, which is the record; this line is what a person
+# reading the delivery sees.
 S3_KEY_MARKER = "[S3KEY]"
 
 __all__ = [
@@ -122,6 +148,7 @@ __all__ = [
     "WATCHING_FILE",
     "UNANCHORED_REPLY",
     "ListenerError",
+    "collecting_a_job",
     "deliver_to_origin",
     "trigger_mention",
     "handle_assetrun",
@@ -149,35 +176,58 @@ def is_ack(content: str) -> bool:
     return content.startswith(ACK_PREFIX) or content == SWEEP_ACK
 
 
-def workspace_dir(issue_id: str) -> Path:
-    """`.local/agentws/<work id>/generator/` — the Work's own directory."""
-    return AGENTWS_ROOT / issue_id / "generator"
+def workspace_dir(run: Run | str) -> Path:
+    """`.local/agentws/<run label>/generator/` — this run topic's directory.
+
+    Keyed on the run's **anchor id**, which is minted once when the topic is
+    opened and is unique by construction. It used to be the Plane issue id,
+    which a replacement could not mint a fresh one of; a replacement now has
+    its own run topic and therefore its own workspace, so it can neither
+    collect the old attempt's job nor overwrite its outputs.
+    """
+    label = run if isinstance(run, str) else run.label
+    return AGENTWS_ROOT / label / "generator"
 
 
-def prepare_workspace(work: Work) -> Path:
-    """Build (or refresh) the Work's workspace.
+def collecting_a_job(run: Run | str) -> bool:
+    """Whether this run is coming back for a job it already submitted.
 
-    `plan.md` is the Work itself, in the same document shape `register_plan`
-    split it from, minus the `[TOOLS]` footer — that line is addressed to
-    this function, not to the generator. `tools/` is rebuilt from it, both
-    derived from the Work and both replaced on a re-trigger; `result/` and
+    `watching.json` is the whole signal, and it is read **before** the
+    workspace is refreshed, because that decides whether it may be.
+    """
+    return (workspace_dir(run) / WATCHING_FILE).is_file()
+
+
+def prepare_workspace(request: Request, run: Run | str, collecting: bool = False) -> Path:
+    """Build (or refresh) this run's workspace from the recorded plan.
+
+    `plan.md` is the request's current plan post, verbatim — the document the
+    generator wrote and the requester read. `tools/` is rebuilt from the
+    `[tools]` note beside it: no note at all is a request nobody recorded a
+    selection for and gets the whole library, and a recorded selection of
+    none gets none. Both are replaced on a re-trigger; `result/` and
     `intermediate/` are left as they are.
+
+    **`collecting` freezes both.** A run woken by the notifier is collecting
+    outputs a ComfyUI job produced from the plan as it stood when the job was
+    submitted. Re-planning meanwhile changes the request, and it must not
+    change the attempt: the plan and tools on disk are the attempt's own, and
+    they stay.
 
     A leftover `failure.flag` is removed here, so a re-trigger starts clean
     and the flag found after the run is this run's own verdict. So is a
     leftover `pending.json`, for the same reason. `watching.json` is *kept*:
-    it is how the next run learns which job it is collecting.
+    it is how this run learns which job it is collecting.
     """
-    workspace = workspace_dir(work.issue_id)
+    workspace = workspace_dir(run)
     workspace.mkdir(parents=True, exist_ok=True)
-    description, requested = split_tools_footer(work.description)
-    (workspace / "plan.md").write_text(
-        compose_document(work.name, description_html(description)), encoding="utf-8"
-    )
-    shutil.rmtree(workspace / TOOLS_DIR, ignore_errors=True)
-    toolsets.place(
-        toolsets.names() if requested is None else requested, workspace / TOOLS_DIR
-    )
+    if not collecting:
+        (workspace / "plan.md").write_text(request.plan, encoding="utf-8")
+        shutil.rmtree(workspace / TOOLS_DIR, ignore_errors=True)
+        toolsets.place(
+            toolsets.names() if request.tools is None else request.tools,
+            workspace / TOOLS_DIR,
+        )
     (workspace / FAILURE_FLAG).unlink(missing_ok=True)
     (workspace / PENDING_FILE).unlink(missing_ok=True)
     (workspace / "result").mkdir(exist_ok=True)
@@ -201,29 +251,42 @@ def run_generator(workspace: Path) -> str:
 
 
 def serve(context) -> TopicResult:
-    """One trigger: the Work this topic names, run and delivered twice.
+    """One trigger: the request this topic names, run and delivered twice.
 
-    Everything the run needs is read off the topic — which Work
-    (`[selfnote][work]`), where the requester is talking
-    (`[selfnote][rootchat]`), and what they just asked for (the chatlog).
-    Nothing is chosen from a queue.
+    Everything the run needs is read off the topic and the record it points
+    at — which request (`[selfnote][assetrun]`), what its plan and toolsets
+    currently are, and what the trigger just asked for (the chatlog). Nothing
+    is chosen from a queue and nothing is looked up in another system.
     """
-    anchored = own_work(context.history, context.self_id)
-    if anchored is None:
+    run = read_run(context.client, context.channel, context.topic, context.self_id,
+                   history=context.history)
+    if run is None:
         return TopicResult([UNANCHORED_REPLY])
-    project_id, issue_id = anchored
 
-    context.step = "loading the work"
-    work = work_by_id(project_id, issue_id)
-    if work is None:
+    context.step = "loading the request"
+    request = request_of_run(context.client, run, context.self_id)
+    if request is None:
+        # The anchor is gone, so the request is *absent* — not "whatever now
+        # wears that topic name". Saying so is the honest answer and the one
+        # that keeps a replacement from inheriting somebody else's run.
         return TopicResult([
-            f"the Work this topic runs ({issue_id}) is gone from Plane; "
+            f"the request this topic runs ({request_label(run.request_id)}) is gone; "
             "plan it again in an `assetplan-…` topic"
         ])
-    sections = [f'running "{work.name}"']
+    if not request.plan:
+        return TopicResult([
+            f"{request.label} has no plan recorded yet, so there is nothing to run; "
+            f"ask for one in {request.topic}"
+        ])
+    sections = [f'running "{request.title}"']
 
     context.step = "preparing the workspace"
-    workspace = prepare_workspace(work)
+    # Read before anything is refreshed: it is what decides whether the plan
+    # and tools on disk belong to this attempt or to the request as it stands.
+    collecting = collecting_a_job(run)
+    workspace = prepare_workspace(request, run, collecting=collecting)
+    if collecting:
+        sections.append("collecting the job this run submitted; its own plan and tools stand")
     # The conversation is input, not decoration: this is where the trigger
     # says what it wants of a plan that was written some time ago.
     chatlog_path(workspace).write_text(
@@ -249,29 +312,28 @@ def serve(context) -> TopicResult:
         # and its callback will land here and trigger the next run.
         context.step = "handing the job to the notifier"
         prompt_id, note = pending
-        start_watching(workspace, trigger_mention(context))
+        start_watching(workspace, trigger_mention(context), run=run, request=request)
         sections.append(watch_line(prompt_id, note))
+        context.step = "recording the pending job"
+        set_run_state(context.client, run, RUN_PENDING)
         sections.append(
-            f"queued as `{prompt_id}` and left with the notifier; this Work "
-            "stays open and its next run collects the outputs"
+            f"queued as `{prompt_id}` and left with the notifier; {request.label} "
+            "stays open and this run's next serving collects the outputs"
         )
         return TopicResult(sections)
 
     context.step = "packaging the result"
     (workspace / WATCHING_FILE).unlink(missing_ok=True)
     files = result_files(workspace)
-    comment = answer
+    key = ""
     if files:
         key, url = upload_result(zip_result(workspace))
         footer = s3_key_footer(key)
         delivery = (
-            f"result of \"{work.name}\" ({len(files)} file(s)), "
+            f"result of \"{request.title}\" ({len(files)} file(s)), "
             f"temporary download (expires in {generate.DEFAULT_TTL_MINUTES} min): "
             f"{url}\n{footer}"
         )
-        # The Plane comment is the ledger consumers read months later, so it
-        # carries the key too — never only the URL that outlives it by an hour.
-        comment = f"{answer}\n\n{footer}" if answer else footer
         sections.append(
             f"result/ holds {len(files)} file(s); zipped and uploaded as {key}"
         )
@@ -279,24 +341,51 @@ def serve(context) -> TopicResult:
         delivery = answer
         sections.append("result/ is empty; delivering the answer text")
     if not succeeded:
-        # The requester hears the same verdict the Work does; whatever the run
-        # did produce still travels with it.
+        # The requester hears the same verdict the record does; whatever the
+        # run did produce still travels with it.
         delivery = f"{FAILED_PREFIX}\n\n{delivery}"
 
     context.step = "origin delivery"
-    sections.append(deliver_to_origin(context, work, delivery, waiting_for))
+    sections.append(deliver_to_origin(context, request, delivery, waiting_for))
 
-    context.step = "reporting to plane"
-    # `success=False` leaves the Work in its unstarted state, so it stays
-    # selectable and a re-trigger runs it again.
-    label, commented, completed = report_work(
-        work.project_id, work.issue_id, comment, succeeded
-    )
-    sections.append(
-        f"work {label}: commented {'yes' if commented else 'no'}, "
-        f"Done {'yes' if completed else 'no'}"
-    )
+    context.step = "recording the outcome"
+    sections.append(record_outcome(context.client, run, request, key, succeeded))
     return TopicResult(sections)
+
+
+def record_outcome(
+    client: ZulipClient, run: Run, request: Request, key: str, succeeded: bool
+) -> str:
+    """Write this attempt's verdict and its durable result into both records.
+
+    The key first, because it is the fact; then the state, in both
+    conversations, because they answer different questions — this run
+    delivered, and this request has been delivered. The newest state note
+    wins, so a fresh attempt after a failure is never read through the old
+    success verdict, and a failure after a success is not read through that
+    one either.
+
+    Whatever fails here is reported in the summary and never raised: the
+    asset has already been delivered to the requester, and losing the run's
+    report because the record could not be written would be the worse
+    outcome.
+    """
+    parts: list[str] = []
+    try:
+        if key:
+            record_result(client, run, request, key)
+            parts.append(f"recorded {key}")
+        set_run_state(client, run, RUN_DELIVERED if succeeded else RUN_FAILED)
+        set_request_state(
+            client, request, REQUEST_DELIVERED if succeeded else REQUEST_FAILED)
+    except RecordError as error:
+        log(f"recording the outcome of {run.label} failed: {error!r}")
+        return f"the outcome could not be recorded ({error})"
+    parts.append(
+        f"{run.label} is {RUN_DELIVERED if succeeded else RUN_FAILED}, "
+        f"{request.label} is {REQUEST_DELIVERED if succeeded else REQUEST_FAILED}"
+    )
+    return "; ".join(parts)
 
 
 def handle_assetrun(client: ZulipClient, channel: str, topic: str) -> None:
@@ -338,24 +427,39 @@ def pending_watch(workspace: Path) -> tuple[str, str] | None:
     return prompt_id, " ".join(str(pending.get("note") or "").split())
 
 
-def start_watching(workspace: Path, trigger: str = "") -> None:
+def start_watching(
+    workspace: Path, trigger: str = "", run: Run | None = None,
+    request: Request | None = None,
+) -> None:
     """Consume `pending.json`, remembering who is waiting for this job.
 
-    The watch is asked for exactly once — and `trigger` is carried across the
-    gap because the requester is about to become unreadable. The run that
+    The watch is asked for exactly once — the rename is what makes that true
+    across a listener restart — and `trigger` is carried across the gap
+    because the requester is about to become unreadable. The run that
     collects the outputs is triggered by the *notifier's* callback, so the
     last voice in the topic is a bot that cannot want anything; delivering to
     it names a machine and leaves the person who asked un-served. Measured
     the first time this path ran end to end.
+
+    `run` and `request` are written beside it as the work identity this
+    pending job belongs to. Nothing reads them back — the workspace is
+    already named after the run, and the record is in Zulip — but a directory
+    full of render files should say whose job it is holding without a lookup.
     """
     pending = workspace / PENDING_FILE
-    if trigger:
+    stamp = {"trigger": trigger} if trigger else {}
+    if run is not None:
+        stamp["run"] = run.label
+        stamp["request"] = request_label(run.request_id)
+    if request is not None:
+        stamp["conversation"] = f"{request.channel}/{request.topic}"
+    if stamp:
         try:
             body = json.loads(pending.read_text(encoding="utf-8"))
-            body["trigger"] = trigger
+            body.update(stamp)
             pending.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n",
                                encoding="utf-8")
-        except (OSError, json.JSONDecodeError, TypeError):
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
             pass  # the rename matters; the courtesy of a name does not
     pending.replace(workspace / WATCHING_FILE)
 
@@ -412,16 +516,17 @@ def s3_key_footer(key: str) -> str:
     return f"{S3_KEY_MARKER} {key}"
 
 
-def origin_of(context, work: Work) -> tuple[str, str] | None:
-    """Where the requester is talking: the topic's root note, or the Work's key.
+def origin_of(request: Request) -> tuple[str, str]:
+    """Where the requester is talking: the request's **current** conversation.
 
-    The root note is what forge wrote when it opened this topic, so it is the
-    answer for anything planned since p8. `work.origin()` — p1's
-    `<channel>/<topic>` external id — still answers for a Work planned
-    before that.
+    Not the root note. The root note carries a *name*, and a name does not
+    follow a rename — which is exactly what retiring a request does to it.
+    `request_of_run` resolved the anchor id a moment ago, so this is where
+    that conversation is now, ✔ and retirement and all; a request whose
+    anchor was deleted never becomes a `Request` at all, and `serve` says so
+    before ever reaching here.
     """
-    home = own_rootchat(context.history, context.self_id)
-    return home.as_pair() if home is not None else work.origin()
+    return (request.channel, request.topic)
 
 
 def trigger_mention(context) -> str:
@@ -447,7 +552,7 @@ def trigger_mention(context) -> str:
     return ""
 
 
-def deliver_to_origin(context, work: Work, delivery: str, mention: str = "") -> str:
+def deliver_to_origin(context, request: Request, delivery: str, mention: str = "") -> str:
     """Post the delivery into the `assetplan-` topic, naming who triggered it.
 
     The trigger came from somewhere, and whoever made it is waiting in their
@@ -462,17 +567,20 @@ def deliver_to_origin(context, work: Work, delivery: str, mention: str = "") -> 
 
     Said either way — the assetrun summary must survive everything, including
     a dead origin channel. The origin `assetplan-` topic may already be
-    resolved (`✔`); posting under the plain name still lands, and this bot
-    being last poster there cannot re-trigger the assetplan sweep.
+    resolved, or renamed out of the way entirely by a retirement; the anchor
+    was resolved to its live conversation before this call, and `topic_write`
+    posts under the name it wears now. This bot being last poster there
+    cannot re-trigger the assetplan sweep.
     """
-    origin = origin_of(context, work)
-    if origin is None:
-        return f"no origin topic recorded; the result stays here:\n\n{delivery}"
-    channel, topic = origin
+    channel, topic = origin_of(request)
     trigger = mention or trigger_mention(context)
     body = f"{trigger}\n\n{delivery}" if trigger else delivery
     try:
-        topic_write(topic, body, channel=channel, client=context.client)
+        # Under the name it wears **now**: a post under the bare name of a
+        # topic that has been resolved opens a twin beside the conversation
+        # instead of landing in it.
+        topic_write(live_topic_name(context.client, channel, topic), body,
+                    channel=channel, client=context.client)
     except Exception as error:  # noqa: BLE001 - reported, never fatal
         log(f"origin delivery to {channel!r}/{topic!r} failed: {error!r}")
         return (

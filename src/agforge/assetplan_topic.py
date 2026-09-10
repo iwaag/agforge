@@ -7,7 +7,7 @@ shared with agautolab. What is agforge's own is the two-agent shape:
     <N>/front/       chatlog.md          → front run  → its answer, posted
                      toolsets.csv                        (what it asked for)
     <N>/generator/   required_items.md   → generator run
-                     tools/toolset-*.md    plan.md → a Plane Work
+                     tools/toolset-*.md    plan.md → this topic's record
                                            idea.md → posted verbatim
                                                    → its answer, posted
 
@@ -15,11 +15,18 @@ Generation directories are never deleted. Cutting a new `N` is precisely what
 stops a previous generation's `required_items.md` or `plan.md` from being
 re-executed; leftovers are evidence, not garbage.
 
-Registering the Work also **opens its `assetrun-` topic** and anchors it
-(`anchor.py`), the way autolab opens a `workrun-` topic when it plans a task.
-Until p8 the requester had to invent an `assetrun-` name and hope the queue
-picked the right Work; now the plan's registration is what creates the
-button, and the button knows what it is wired to.
+Recording the plan also **opens the request's `assetrun-` topic** and anchors
+it (`anchor.py`), the way autolab opens a `workrun-` topic when it plans a
+task. Until p8 the requester had to invent an `assetrun-` name and hope the
+queue picked the right Work; now the plan is what creates the button, and the
+button knows what it is wired to.
+
+Since `refactor` p2 there is no Work and no Plane. The plan is a post in
+**this** topic, named by a `[selfnote][doc]` note, with the toolsets it was
+planned with beside it; the request's identity is the message id of its own
+`[selfnote][asset]` note (`record.py`). Registration used to be a write to
+another system that could be down; it is now a write to the conversation the
+requester is already reading.
 """
 
 from __future__ import annotations
@@ -41,17 +48,18 @@ from agag.topics import (
     serve_topic,
     topic_workspace as shared_topic_workspace,
 )
-from agag.zulip import ZulipClient, log, topic_write
+from agag.zulip import ZulipClient, log
 
 from . import toolsets
-from .anchor import (
-    Conversation,
-    assetrun_topic_name,
-    own_work,
-    rootchat_note,
-    work_note,
+from .record import (
+    ASSETPLAN_TOPIC_PREFIX,
+    ASSETRUN_TOPIC_PREFIX,
+    RecordError,
+    Request,
+    ensure_request,
+    open_run,
+    record_plan,
 )
-from .plane import Registration, register_plan as plane_register_plan
 from .role_run import AGFORGE_ROOT, run_role
 from .zulip_chat import ACK_PREFIX, SWEEP_ACK
 
@@ -71,13 +79,9 @@ PLAN_FILE = "plan.md"
 IDEA_FILE = "idea.md"
 EMPTY_REPLY = "There is nothing in this topic to answer yet."
 
-# The two topic names of one request. Spelled here rather than imported from
-# the listener so this module is readable without it; `zulip_listener` owns
-# the same two constants as the sweep's filter.
-ASSETPLAN_TOPIC_PREFIX = "assetplan-"
-ASSETRUN_TOPIC_PREFIX = "assetrun-"
-
 __all__ = [
+    "ASSETPLAN_TOPIC_PREFIX",
+    "ASSETRUN_TOPIC_PREFIX",
     "ListenerError",
     "front_prompt",
     "generation_dir",
@@ -141,52 +145,41 @@ def run_generator(cwd: Path) -> str:
     )
 
 
-def register_plan(channel: str, topic: str, plan: Path, tools=()) -> Registration:
-    """Wrapped so the whole Plane route stays behind one name here."""
-    return plane_register_plan(channel, topic, plan, tools)
+def register_plan(
+    client: ZulipClient, channel: str, topic: str, plan: Path, tools, self_id: int,
+) -> tuple[Request, str]:
+    """Record one generator `plan.md` as this request's plan. `(request, line)`.
+
+    The request is anchored on first sight — its identity is minted by that
+    note — and the plan is posted into the conversation that asked for it,
+    with the toolsets this generation actually placed in `tools/` recorded
+    beside it, so the run that executes it later rebuilds the same `tools/`.
+
+    Planning again posts a new plan and a new `[doc]` note; the old post
+    stays where it was, which is the history of the request.
+    """
+    try:
+        request = ensure_request(client, channel, topic, self_id)
+        document = plan.read_text(encoding="utf-8")
+        request = record_plan(client, request, document, tools)
+    except RecordError as error:
+        # This module's own error, so the handler's one discipline covers a
+        # plan that is not a document and a realm that refused the post alike.
+        raise ListenerError(str(error)) from error
+    listed = ", ".join(request.tools or []) or "none"
+    return request, f'recorded {request.label} "{request.title}" (toolsets: {listed})'
 
 
-def open_assetrun(
-    client: ZulipClient,
-    channel: str,
-    topic: str,
-    registration: Registration,
-    self_id: int,
-) -> str:
-    """Open this Work's own `assetrun-` topic and anchor it to two things.
+def open_assetrun(client: ZulipClient, request: Request, self_id: int) -> str:
+    """Open this request's own `assetrun-` topic. `record.open_run`, said.
 
     autolab opens a `workrun-` topic when it plans a task; this is the same
-    move on agforge's vocabulary. The topic is opened with its two selfnotes
-    first — the root note back to this `assetplan-` conversation, and the
-    Work id — and then one visible line, which is all a reader ever sees of
-    it. Because forge is its own last real speaker there, opening the topic
-    does not fire it: a post from somebody else is what starts the run, and
-    what that post *says* is read.
-
-    Idempotent by the Work note: a second generation of the same plan finds
-    its topic already anchored and only says where it is.
+    move on agforge's vocabulary, and the topic is named after the request's
+    anchor id so a later replacement under the same stem cannot merge into
+    it.
     """
-    run_topic = assetrun_topic_name(topic, ASSETRUN_TOPIC_PREFIX, ASSETPLAN_TOPIC_PREFIX)
-    history = client.topic_history(channel, run_topic, num_before=200)
-    if own_work(history, self_id) is None:
-        topic_write(
-            run_topic,
-            rootchat_note(Conversation(channel, topic)),
-            channel=channel, client=client,
-        )
-        topic_write(
-            run_topic,
-            work_note(registration.project_id, registration.issue_id),
-            channel=channel, client=client,
-        )
-        topic_write(
-            run_topic,
-            f'This topic runs {registration.label} "{registration.title}". '
-            "Post here to start it, saying anything you want done differently; "
-            f"the result is posted back here and in {topic}.",
-            channel=channel, client=client,
-        )
-    return f"posting in {run_topic} starts it"
+    run = open_run(client, request, self_id)
+    return f"posting in {run.topic} starts it"
 
 
 def place_toolsets(front_dir: Path, generator_dir: Path) -> list[str]:
@@ -230,16 +223,15 @@ def handle_generator(context, front_dir: Path, number: int) -> list[str]:
     sections: list[str] = []
     plan = generator_dir / PLAN_FILE
     if plan.is_file():
-        # The Work carries the toolsets it was planned with, so the run that
-        # executes it later gets the same `tools/`.
-        registration = register_plan(channel, topic, plan, placed)
-        sections.append(registration.line)
-        # Registering the plan is what opens the Work's own topic — the
+        # The record carries the toolsets the plan was made with, so the run
+        # that executes it later gets the same `tools/`.
+        request, line = register_plan(
+            context.client, channel, topic, plan, placed, context.self_id)
+        sections.append(line)
+        # Recording the plan is what opens the request's own run topic — the
         # requester never has to know a name to trigger it, and the topic
-        # itself carries which Work it runs.
-        sections.append(
-            open_assetrun(context.client, channel, topic, registration, context.self_id)
-        )
+        # itself carries which request it runs.
+        sections.append(open_assetrun(context.client, request, context.self_id))
     idea = generator_dir / IDEA_FILE
     if idea.is_file():
         sections.append(idea.read_text(encoding="utf-8").strip())

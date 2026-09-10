@@ -15,6 +15,11 @@ def test_main_posts_the_committed_markdown_to_the_shared_board(monkeypatch):
         def send_to_channel(self, channel, topic, text):
             sent.append((channel, topic, text))
 
+        def whoami(self):
+            """The introduction is generated from the running instance, so it
+            reads the account it will be mentioned by."""
+            return {"user_id": 13, "full_name": "Forge"}
+
     monkeypatch.setattr(skeleton.ZulipClient, "from_env", lambda path: Client())
     monkeypatch.setenv(intro.SPEC.instance_env_var, "agforge-agstudio1")
 

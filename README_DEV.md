@@ -37,10 +37,12 @@ workspace root).
 - `agent/toolsets/toolset-*.md` — one document per toolset, opening with a
   `# Description` section. They are the generator's tool vocabulary, and the
   unit the whole assetplan flow moves around: the front's `toolsets.csv`
-  becomes `generator/tools/`, the resulting Work carries a
-  `[TOOLS] toolset-image, …` footer on its description, and `assetrun`
-  rebuilds the same `tools/` from that footer (no footer — hand-made Work —
-  means the whole library). `src/agforge/toolsets.py` is the only reader.
+  becomes `generator/tools/`, the request records a
+  `[selfnote][tools] toolset-image, …` note beside its plan, and `assetrun`
+  rebuilds the same `tools/` from that note (no note at all — a hand-made
+  request, or one from before `refactor` p2 — means the whole library; a
+  recorded selection of none means none). `src/agforge/toolsets.py` is the
+  only reader.
 - `agent/guides/` — what each role is told, per flow.
 - `uv run service/transform.py [--format png|jpeg] [--width W --height H]
   <file>` — resize/convert/re-upload; fresh URL on the last line. No flags
@@ -89,8 +91,9 @@ GET  /healthz           -> { "ok": true }
 
 `/api/resign` is a pure script — no agent run, no upload, no cost. A delivery's
 presigned URL lives `DEFAULT_TTL_MINUTES` (60); the object behind it lives on.
-Every delivery therefore carries its key as an `[S3KEY] <key>` last line, in
-both the chat post and the Plane comment, and a consumer re-signs that key
+Every delivery therefore carries its key as an `[S3KEY] <key>` last line, and
+the same key is recorded as a `[selfnote][result]` note in both of the
+request's conversations, and a consumer re-signs that key
 immediately before it needs a live URL rather than hoping the link it was
 handed has not expired. The 404 exists because signing is a pure signature
 operation: it succeeds for a key that was never uploaded, and the resulting
@@ -107,6 +110,41 @@ agdevworld is the current caller. It reads the whole body with a model,
 not a schema, so no key here is agreed in advance (unshackle_agent
 turn2/turn3).
 
+## The work record (`refactor` p2)
+
+**forge's record is its conversations.** There is no Plane issue behind an
+asset request any more, and `agag.plane` is not imported by any module of
+this package (`tests/test_plane_independence.py` asserts it, in-process and
+in a fresh interpreter).
+
+`src/agforge/record.py` reads and writes it; `src/agforge/anchor.py` is the
+note vocabulary:
+
+    [selfnote][asset] <stem>            in an assetplan- topic  → the request
+    [selfnote][doc] <message id>        which post is the current plan
+    [selfnote][tools] <names>           the toolsets it was planned with
+    [selfnote][assetrun] <request id>   in an assetrun- topic   → the run
+    [selfnote][state] <word>            planned/delivered/failed/retired
+    [selfnote][result] <object key>     one durable asset it produced
+    [selfnote][replaces] <message id>   the request this one replaced
+
+**Identity is a message id**: the `[asset]` note's own id *is* the request
+(`a5912`), and the `[assetrun]` note's own id is the run (`r5913`). The run
+topic is named `assetrun-<stem>-a<request id>`, so a requester's stem can be
+reused without two requests ever merging. The plan is an ordinary visible
+post — prose is what a person reads — and every delivery follows the anchor
+home, so it survives a resolve, a hand rename and a retirement.
+
+`uv run python -m agforge.retire <channel> <topic> [--replace]` is the one
+retirement route: both conversations are renamed to `✔ retired-…-a<id>` and
+the stem is released. A job still running is collected by the old run topic
+and delivered to the retired request — late replies belong to the request
+that asked.
+
+The workspace is `.local/agentws/r<run id>/generator/`, per run topic. While
+`watching.json` is there the run is *collecting*, and its `plan.md` and
+`tools/` are left exactly as the job was submitted with them.
+
 ## Chat contract
 
 `agforge-agstudio1` is this instance's Single Entrance: every unresolved
@@ -121,22 +159,22 @@ topic to plan an asset. The committed `params/intro.md` is posted with
 `agent/guides/entrance_front/guide.md`, with `agentchat` on PATH and
 `AGENTCHAT_ZULIP_ENV` naming this bot's credentials (`role_run.py`). It
 reads its own channel's topic list — `assetplan-` plans, `assetrun-` runs,
-`✔ ` for finished — and answers what was asked. Nothing is read from Plane
-and nothing is generated. Asked to close finished conversations out, it
+`✔ ` for finished — and answers what was asked. Nothing is generated. Asked to close finished conversations out, it
 reads them to check and then `agentchat resolve`s them; it never tidies on
 its own. Every question there is one paid `sonnet` run, where it used to be
 a free canned line.
 
 **Since `agent_standardize` p8 the `assetrun-…` topic is opened by agforge**,
-not invented by the requester: registering the plan opens
-`assetrun-<the same stem>` in the same channel and anchors it with two
-selfnotes (`src/agforge/anchor.py`) — the `[rootchat]` note back to the
-`assetplan-` conversation, and a `[work]` note carrying the Plane ids.
+not invented by the requester: recording the plan opens
+`assetrun-<the same stem>-a<request id>` in the same channel and anchors it
+with two selfnotes (`src/agforge/anchor.py`) — the `[rootchat]` note back to
+the `assetplan-` conversation, and an `[assetrun]` note naming the request by
+the message id that *is* it (`refactor` p2).
 Selfnotes are `agag.selfnote`'s convention and are invisible in every
 chatlog, `threads/` file and `agentchat read`, so the topic shows one
-human-readable line. A post there runs *that* Work; `works.next_work` and its
+human-readable line. A post there runs *that* request; `works.next_work` and its
 eligibility policy are gone, and with them the requester's old burden of "one
-trigger, one Work — let the delivery land before the next one". The trigger
+trigger, one request — let the delivery land before the next one". The trigger
 post is real input: it reaches the generator as `chatlog.md` beside
 `plan.md`. The result is posted into both topics, each naming whoever
 triggered the run.
