@@ -50,6 +50,15 @@ in this topic, so it triggers the next run, which finds `watching.json` and
 collects the outputs. That hand-off is why the generator never needs a Zulip
 voice of its own (`episodes/zulip_command`, the agforge follow-up).
 
+**A callback can arrive twice**, and the second one has no `watching.json`
+left to collect — it would read as an ordinary trigger, run the generator
+against the plan, submit a *new* ComfyUI job and deliver a second time for
+one request. `collected.txt` is what stops that: every collected job's id is
+remembered beside the workspace, and a trigger naming one is answered and
+nothing else. On disk, because a callback outlives the process that asked
+for the watch; a restart recovers the pending job from `watching.json` and
+the finished ones from here, and submits neither again.
+
 **Only the delivery names the trigger** (`agent_standardize` p9). Being named
 is how a requester's next turn happens at all, so naming them in both places
 gives them two — p8's proof watched Front tell the developer "done" twice for
@@ -113,6 +122,16 @@ FAILURE_FLAG = "failure.flag"
 PENDING_FILE = "pending.json"
 WATCHING_FILE = "watching.json"
 
+# Every ComfyUI job this run topic has already collected, one id per line.
+# The notifier's callback is an ordinary post, so a second one — a retry, a
+# restart that re-reads the mention, somebody quoting it — would otherwise
+# start a whole new generation and deliver a second time for one job. This
+# file is what makes the *second* callback a no-op, and it is on disk beside
+# the workspace because the callback outlives the process that asked for it.
+COLLECTED_FILE = "collected.txt"
+#: How much of a prompt id the notifier's first line carries.
+SHORT_ID = 8
+
 # Real work, not a planning pass: autolab's work run uses 1200 s and the
 # assetplan-flow generator 900 s; this sits at the top of that range.
 ASSETRUN_TIMEOUT_SECONDS = 1200
@@ -144,16 +163,20 @@ __all__ = [
     "FAILED_PREFIX",
     "FAILURE_FLAG",
     "PENDING_FILE",
+    "COLLECTED_FILE",
     "S3_KEY_MARKER",
     "WATCHING_FILE",
     "UNANCHORED_REPLY",
     "ListenerError",
+    "collected_ids",
     "collecting_a_job",
     "deliver_to_origin",
+    "duplicate_callback",
     "trigger_mention",
     "handle_assetrun",
     "pending_watch",
     "prepare_workspace",
+    "remember_collected",
     "remembered_trigger",
     "result_files",
     "start_watching",
@@ -284,7 +307,18 @@ def serve(context) -> TopicResult:
     # Read before anything is refreshed: it is what decides whether the plan
     # and tools on disk belong to this attempt or to the request as it stands.
     collecting = collecting_a_job(run)
+    workspace = workspace_dir(run)
+    if not collecting and (again := duplicate_callback(context, workspace)):
+        # Answered and nothing else: no generator run, so no second job is
+        # submitted, and no delivery, so the requester is not told twice
+        # about one result. Cheap on purpose — a duplicate callback must cost
+        # nothing, because a retrying notifier can send several.
+        return TopicResult([
+            f"`{again}` was already collected and delivered; nothing more to do. "
+            "Post what you want done differently to run this again."
+        ])
     workspace = prepare_workspace(request, run, collecting=collecting)
+    collecting_id = watched_id(workspace) if collecting else ""
     if collecting:
         sections.append("collecting the job this run submitted; its own plan and tools stand")
     # The conversation is input, not decoration: this is where the trigger
@@ -324,6 +358,9 @@ def serve(context) -> TopicResult:
 
     context.step = "packaging the result"
     (workspace / WATCHING_FILE).unlink(missing_ok=True)
+    # Before the delivery, not after: a delivery that half-succeeded must not
+    # leave the job open to being collected all over again.
+    remember_collected(workspace, collecting_id)
     files = result_files(workspace)
     key = ""
     if files:
@@ -475,6 +512,62 @@ def remembered_trigger(workspace: Path) -> str:
     except (OSError, json.JSONDecodeError):
         return ""
     return str((watching or {}).get("trigger") or "").strip()
+
+
+def collected_ids(workspace: Path) -> list[str]:
+    """Every ComfyUI job this run topic has already collected."""
+    try:
+        text = (workspace / COLLECTED_FILE).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def remember_collected(workspace: Path, prompt_id: str) -> None:
+    """Record that this job's outputs are in. Appended, never rewritten."""
+    if not prompt_id or prompt_id in collected_ids(workspace):
+        return
+    with (workspace / COLLECTED_FILE).open("a", encoding="utf-8") as handle:
+        handle.write(f"{prompt_id}\n")
+
+
+def watched_id(workspace: Path) -> str:
+    """The job this run is collecting, read before the generator deletes it."""
+    try:
+        watching = json.loads((workspace / WATCHING_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str((watching or {}).get("prompt_id") or "").strip()
+
+
+def duplicate_callback(context, workspace: Path) -> str:
+    """The already-collected job this trigger is a second callback for.
+
+    A notifier callback is an ordinary post, and an ordinary post is what
+    starts a run. Nothing stops the notifier — or a restart re-reading the
+    same mention, or somebody quoting the callback — from delivering it
+    twice, and the second one would arrive with no `watching.json` to
+    collect: an ordinary trigger, which would run the generator against the
+    plan, submit a **new** ComfyUI job, and deliver a second time for one
+    request.
+
+    So a trigger that names a job this workspace has already collected is
+    answered and nothing else. Only the id is matched — the full one and the
+    short form the callback's first line carries — because the wording of a
+    notifier post is not this module's to depend on.
+    """
+    known = collected_ids(workspace)
+    if not known:
+        return ""
+    for message in reversed(list(context.history)):
+        if message.get("sender_id") == context.self_id:
+            continue
+        if is_selfnote(message.get("content")):
+            continue
+        text = str(message.get("content") or "")
+        return next((one for one in known
+                     if one in text or one[:SHORT_ID] in text), "")
+    return ""
 
 
 def watch_line(prompt_id: str, note: str) -> str:

@@ -702,6 +702,79 @@ def test_a_replacement_does_not_collect_the_old_attempt_s_job(monkeypatch, tmp_p
     assert record.read_request(client, CHANNEL, ORIGIN_TOPIC, BOT_ID).results == ()
 
 
+def test_a_second_callback_submits_nothing_and_delivers_nothing(monkeypatch, tmp_path):
+    """The notifier's callback is an ordinary post, and an ordinary post is
+    what starts a run. A retried callback would find no `watching.json`, read
+    as a fresh trigger, submit a **new** job and deliver a second time for
+    one request."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad-5f47-4a0e", "note": ""})
+    client = Client(calls)
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+    wire(monkeypatch, tmp_path, calls, result_writes=[("apple.png", "x")])
+    client.speak("comfy success b09133ad in 92s", sender_id=21, name="Comfy Notifier")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+    delivered = len(visible(calls, ORIGIN_TOPIC))
+    calls.clear()
+
+    # The same callback again — the short id is what its first line carries.
+    client.speak("comfy success b09133ad in 92s", sender_id=21, name="Comfy Notifier")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+
+    assert "was already collected and delivered" in calls[-1][2]
+    assert not any(c[0] == "generator" for c in calls)   # no second job
+    assert not any(c[0] == "upload" for c in calls)
+    assert visible(calls, ORIGIN_TOPIC) == []            # and no second delivery
+    assert delivered == 1
+
+
+def test_a_person_asking_for_it_again_after_a_collection_still_runs(monkeypatch, tmp_path):
+    """The guard is about a repeated *callback*, not about the topic. A
+    request to run it again is ordinary work and must not be swallowed."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad-5f47-4a0e", "note": ""})
+    client = Client(calls)
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+    wire(monkeypatch, tmp_path, calls, result_writes=[("apple.png", "x")])
+    client.speak("comfy success b09133ad", sender_id=21, name="Comfy Notifier")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+    calls.clear()
+
+    client.speak("make it brighter and run it again")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+
+    assert any(c[0] == "generator" for c in calls)
+    assert len(visible(calls, ORIGIN_TOPIC)) == 1
+
+
+def test_a_restart_after_a_collection_does_not_run_the_job_again(monkeypatch, tmp_path):
+    """Restart recovery re-reads the topic, so it meets the same callback the
+    finished run was woken by. The collected ids are on disk for that reason."""
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad-5f47-4a0e", "note": ""})
+    client = Client(calls)
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+    wire(monkeypatch, tmp_path, calls, result_writes=[("apple.png", "x")])
+    client.speak("comfy success b09133ad", sender_id=21, name="Comfy Notifier")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+    workspace = ws(tmp_path, client)
+    assert assetrun_topic.collected_ids(workspace) == ["b09133ad-5f47-4a0e"]
+    calls.clear()
+
+    # A fresh process, the same realm and the same workspace.
+    restarted = Client(calls)
+    restarted.histories, restarted.streams = client.histories, client.streams
+    restarted.run, restarted.request = client.run, client.request
+    restarted.topic = client.topic
+    assetrun_topic.handle_assetrun(restarted, CHANNEL, restarted.topic)
+
+    assert not any(c[0] == "generator" for c in calls)
+    assert visible(calls, ORIGIN_TOPIC) == []
+
+
 def test_a_run_that_queued_and_then_failed_is_a_failure_not_a_wait(monkeypatch, tmp_path):
     """`failure.flag` wins: a job may have been queued before the run knew it
     could not finish, and waiting for a notifier that will report a job

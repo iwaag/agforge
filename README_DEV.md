@@ -143,7 +143,12 @@ that asked.
 
 The workspace is `.local/agentws/r<run id>/generator/`, per run topic. While
 `watching.json` is there the run is *collecting*, and its `plan.md` and
-`tools/` are left exactly as the job was submitted with them.
+`tools/` are left exactly as the job was submitted with them. `collected.txt`
+beside it lists the ComfyUI jobs this run topic has already collected: a
+second notifier callback (a retry, a restart re-reading the mention) names
+one of them and is answered and nothing else, so one job is never generated
+or delivered twice. A person asking for it again is ordinary work and still
+runs.
 
 ## Chat contract
 
