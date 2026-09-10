@@ -60,6 +60,10 @@ COVERS = (
 #: "until the pool is 70 % used" cannot be judged against a default that
 #: declines to name a pool.
 DEFAULT_OPTION_DETAIL = ("anthropic", "my configured defaults — Claude Sonnet 5 through claude_code")
+#: The two roles `COVERS` is a sentence about — the front that reads a
+#: conversation and the generator that plans and executes — and the roles the
+#: published pool is **derived** from (`agag.execpool`).
+EXEC_ROLES = ("front", "generator")
 
 
 def configured_profiles(path: Path | None = None) -> frozenset[str]:
@@ -101,6 +105,7 @@ SPEC = AgentSpec(
     FALLBACK_NAME, AGFORGE_ROOT,
     plan_prefix=ASSETPLAN_TOPIC_PREFIX, run_prefix=ASSETRUN_TOPIC_PREFIX,
     exec_options=exec_options(),
+    exec_roles=EXEC_ROLES,
 )
 INSTANCE_TOML = SPEC.instance_toml
 INSTANCE_ENV_VAR = SPEC.instance_env_var
