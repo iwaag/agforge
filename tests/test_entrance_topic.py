@@ -58,3 +58,19 @@ def test_handle_entrance_serves_through_the_shared_skeleton(monkeypatch):
     entrance_topic.handle_entrance(Whoami(), CHANNEL, "question")
     assert seen[0][:2] == (CHANNEL, "question")
     assert seen[0][2]["ack_text"] == shared.SWEEP_ACK
+
+
+def test_the_entrance_publishes_forges_menu_and_obeys_it(monkeypatch):
+    """The entrance is work like any other, so it runs under the topic's
+    option — an option that covered the planning but not the question would
+    be a menu that lies (`refactor` p3 ex1 step 2)."""
+    seen = []
+    monkeypatch.setattr(
+        shared, "serve_topic",
+        lambda client, channel, topic, handler, **kw: seen.append((channel, topic, kw)),
+    )
+    entrance_topic.handle_entrance(Whoami(), CHANNEL, "question")
+    published = seen[0][2]["exec_options"]
+    assert published is not None
+    assert published.bot == "Forge"
+    assert "agy" in published.names and "default" in published.names

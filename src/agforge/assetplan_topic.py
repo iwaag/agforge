@@ -48,6 +48,8 @@ from agag.topics import (
     serve_topic,
     topic_workspace as shared_topic_workspace,
 )
+from agag.agent import exec_options_for
+from agag.execopt import Selection
 from agag.zulip import ZulipClient, log
 
 from . import toolsets
@@ -60,7 +62,7 @@ from .record import (
     open_run,
     record_plan,
 )
-from .role_run import AGFORGE_ROOT, run_role
+from .role_run import AGFORGE_ROOT, SPEC, run_role
 from .zulip_chat import ACK_PREFIX, SWEEP_ACK
 
 TOPICS_ROOT = AGFORGE_ROOT / ".local" / "topics"
@@ -124,24 +126,30 @@ def front_prompt(bot_name: str) -> str:
     )
 
 
-def _run(role: str, prompt: str, cwd: Path, timeout: float) -> str:
+def _run(
+    role: str, prompt: str, cwd: Path, timeout: float,
+    selection: Selection | None = None,
+) -> str:
     record = next_record_path(RECORDS_ROOT / role)
-    output, _, exit_code = run_role(role, prompt, cwd=cwd, timeout=timeout, record=record)
+    output, _, exit_code = run_role(
+        role, prompt, cwd=cwd, timeout=timeout, record=record, selection=selection,
+    )
     if exit_code != 0:
         raise ListenerError(f"{role} run exited {exit_code}: {output.strip()[:500]}")
     return output.strip()
 
 
-def run_front(prompt: str, cwd: Path) -> str:
-    return _run("front", prompt, cwd, FRONT_TIMEOUT_SECONDS)
+def run_front(prompt: str, cwd: Path, selection: Selection | None = None) -> str:
+    return _run("front", prompt, cwd, FRONT_TIMEOUT_SECONDS, selection)
 
 
-def run_generator(cwd: Path) -> str:
+def run_generator(cwd: Path, selection: Selection | None = None) -> str:
     return _run(
         "generator",
         guide("assetplan_generator", "guide_plan.md"),
         cwd,
         GENERATOR_TIMEOUT_SECONDS,
+        selection,
     )
 
 
@@ -170,15 +178,24 @@ def register_plan(
     return request, f'recorded {request.label} "{request.title}" (toolsets: {listed})'
 
 
-def open_assetrun(client: ZulipClient, request: Request, self_id: int) -> str:
+def open_assetrun(
+    client: ZulipClient, request: Request, self_id: int,
+    selection: Selection | None = None,
+) -> str:
     """Open this request's own `assetrun-` topic. `record.open_run`, said.
 
     autolab opens a `workrun-` topic when it plans a task; this is the same
     move on agforge's vocabulary, and the topic is named after the request's
     anchor id so a later replacement under the same stem cannot merge into
     it.
+
+    `selection` is what this planning conversation was set to, and it is
+    **snapshotted** into the run topic before its visible description
+    (`ag.exec-options.v1` §5): the run that executes this plan runs the way
+    the plan was asked for, and a later change here reaches the next request
+    rather than one already under way.
     """
-    run = open_run(client, request, self_id)
+    run = open_run(client, request, self_id, selection)
     return f"posting in {run.topic} starts it"
 
 
@@ -218,7 +235,7 @@ def handle_generator(context, front_dir: Path, number: int) -> list[str]:
     shutil.copyfile(front_dir / REQUIRED_ITEMS, generator_dir / REQUIRED_ITEMS)
     placed = place_toolsets(front_dir, generator_dir)
 
-    answer = run_generator(generator_dir)
+    answer = run_generator(generator_dir, context.selection)
 
     sections: list[str] = []
     plan = generator_dir / PLAN_FILE
@@ -231,7 +248,8 @@ def handle_generator(context, front_dir: Path, number: int) -> list[str]:
         # Recording the plan is what opens the request's own run topic — the
         # requester never has to know a name to trigger it, and the topic
         # itself carries which request it runs.
-        sections.append(open_assetrun(context.client, request, context.self_id))
+        sections.append(open_assetrun(
+            context.client, request, context.self_id, context.selection))
     idea = generator_dir / IDEA_FILE
     if idea.is_file():
         sections.append(idea.read_text(encoding="utf-8").strip())
@@ -248,7 +266,7 @@ def serve(context) -> TopicResult:
     )
 
     context.step = "front"
-    answer = run_front(front_prompt(context.bot_name), front_dir)
+    answer = run_front(front_prompt(context.bot_name), front_dir, context.selection)
 
     if not (front_dir / REQUIRED_ITEMS).is_file():
         # The front has a question, not a spec: no generator run follows, so
@@ -275,4 +293,5 @@ def handle_topic(client: ZulipClient, channel: str, topic: str) -> None:
         client, channel, topic, serve,
         ack_text=SWEEP_ACK,
         empty_reply=EMPTY_REPLY,
+        exec_options=exec_options_for(SPEC, client),
     )

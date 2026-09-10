@@ -82,6 +82,8 @@ from agag.topics import (
     next_record_path,
     serve_topic,
 )
+from agag.agent import exec_options_for
+from agag.execopt import Selection
 from agag.selfnote import is_selfnote
 from agag.zulip import ZulipClient, live_topic_name, log, topic_write
 
@@ -102,7 +104,7 @@ from .record import (
     set_request_state,
     set_run_state,
 )
-from .role_run import AGFORGE_ROOT, run_role
+from .role_run import AGFORGE_ROOT, SPEC, run_role
 from .zulip_chat import ACK_PREFIX, SWEEP_ACK
 
 AGENTWS_ROOT = AGFORGE_ROOT / ".local" / "agentws"
@@ -258,8 +260,14 @@ def prepare_workspace(request: Request, run: Run | str, collecting: bool = False
     return workspace
 
 
-def run_generator(workspace: Path) -> str:
-    """One generator run in the Work's workspace, with its record."""
+def run_generator(workspace: Path, selection: Selection | None = None) -> str:
+    """One generator run in the Work's workspace, with its record.
+
+    `selection` is this serving's frozen execution option — the command
+    posted in this topic, or the snapshot the plan wrote when it opened it.
+    It reaches the collecting run too, because a callback is served like any
+    other post here: the *home* conversation decides, never the notifier's.
+    """
     record = next_record_path(RECORDS_ROOT / "assetrun")
     output, _, exit_code = run_role(
         "generator",
@@ -267,6 +275,7 @@ def run_generator(workspace: Path) -> str:
         cwd=workspace,
         timeout=ASSETRUN_TIMEOUT_SECONDS,
         record=record,
+        selection=selection,
     )
     if exit_code != 0:
         raise ListenerError(f"generator run exited {exit_code}: {output.strip()[:500]}")
@@ -331,7 +340,7 @@ def serve(context) -> TopicResult:
     waiting_for = remembered_trigger(workspace)
 
     context.step = "generator run"
-    answer = run_generator(workspace)
+    answer = run_generator(workspace, context.selection)
     # The run exiting zero is not the whole verdict: the guide tells the
     # generator to leave `failure.flag` when it knows it failed. An empty
     # `result/` is still a legitimate pure-text outcome, not a signal.
@@ -442,6 +451,7 @@ def handle_assetrun(client: ZulipClient, channel: str, topic: str) -> None:
         # post is the record of the run, and naming them here too would buy
         # them a second run for one delivery.
         handoff=False,
+        exec_options=exec_options_for(SPEC, client),
     )
 
 

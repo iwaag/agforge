@@ -49,7 +49,8 @@ class Client(Realm):
     trigger.
     """
 
-    def __init__(self, calls=None, tools=("toolset-image",), said="go", plan=PLAN):
+    def __init__(self, calls=None, tools=("toolset-image",), said="go", plan=PLAN,
+                 selection=None):
         super().__init__({(CHANNEL, ORIGIN_TOPIC): [
             message(content="make me a bird", id=1, topic=ORIGIN_TOPIC)]})
         self.tracker = None
@@ -57,7 +58,7 @@ class Client(Realm):
         self.reads = 0
         request = record.ensure_request(self, CHANNEL, ORIGIN_TOPIC, BOT_ID)
         self.request = record.record_plan(self, request, plan, tools)
-        self.run = record.open_run(self, self.request, BOT_ID)
+        self.run = record.open_run(self, self.request, BOT_ID, selection)
         self.topic = self.run.topic
         if said is not None:
             self.speak(said)
@@ -110,8 +111,8 @@ def wire(monkeypatch, tmp_path, calls, *, answer="made it",
     monkeypatch.setattr(topics, "topic_write", writer)
     monkeypatch.setattr(assetrun_topic, "topic_write", writer)
 
-    def generator_run(workspace):
-        calls.append(("generator", workspace))
+    def generator_run(workspace, selection=None):
+        calls.append(("generator", workspace, selection))
         for name, body in result_writes:
             (workspace / "result" / name).write_text(body)
         if fails:
@@ -621,7 +622,7 @@ def test_the_requester_survives_the_wait_and_the_notifier_is_never_named(
 
     # The collecting run: the notifier spoke last, and the guide has that run
     # delete watching.json before the delivery is composed.
-    def collecting(workspace):
+    def collecting(workspace, selection=None):
         (workspace / "result" / "loop.mp3").write_text("x")
         (workspace / assetrun_topic.WATCHING_FILE).unlink()
         return "collected"
@@ -811,7 +812,7 @@ def test_a_generator_failure_names_its_step(monkeypatch, tmp_path):
     wire(monkeypatch, tmp_path, calls)
     client = Client(calls)
 
-    def explode(workspace):
+    def explode(workspace, selection=None):
         raise assetrun_topic.ListenerError("claude_code timed out")
 
     monkeypatch.setattr(assetrun_topic, "run_generator", explode)
@@ -877,3 +878,82 @@ def test_dispatch_sends_a_plain_own_channel_question_to_the_entrance(monkeypatch
     monkeypatch.setattr(zulip_listener, "instance_name", lambda: "agforge-agstudio1")
     zulip_listener.dispatch(object(), "agforge-agstudio1", "question")
     assert served == [("agforge-agstudio1", "question")]
+
+
+# --- execution options (ag.exec-options.v1, refactor p3 ex1 step 2) --------
+
+from agag.execopt import Selection  # noqa: E402
+
+from agforge import instance  # noqa: E402
+
+
+def exec_command(option, bot="Forge"):
+    return f"@**{bot}** use {option}"
+
+
+def test_a_run_topic_command_reaches_the_generator(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls, result_writes=(("bird.png", "x"),))
+    client = Client(calls, said=None)
+    client.speak(exec_command("agy"))
+    client.speak("go")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+
+    generator = next(call for call in calls if call[0] == "generator")
+    assert generator[2].option == "agy" and generator[2].source == "topic"
+
+
+def test_the_run_inherits_what_the_plan_was_asked_for(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls, result_writes=(("bird.png", "x"),))
+    client = Client(calls, selection=Selection("agy", "topic", 5814))
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+
+    generator = next(call for call in calls if call[0] == "generator")
+    assert generator[2].option == "agy"
+    assert generator[2].source == "inherited"
+    assert str(generator[2].inherited_from) == f"{CHANNEL}/{ORIGIN_TOPIC}"
+
+
+def test_a_command_in_the_run_topic_overrides_what_it_inherited(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls, result_writes=(("bird.png", "x"),))
+    client = Client(calls, said=None, selection=Selection("agy", "topic", 5814))
+    client.speak(exec_command("agy-claude"))
+    client.speak("go")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+
+    generator = next(call for call in calls if call[0] == "generator")
+    assert generator[2].option == "agy-claude" and generator[2].source == "topic"
+
+
+def test_the_collecting_run_keeps_the_selection_the_job_was_submitted_under(
+    monkeypatch, tmp_path,
+):
+    """A callback continues the request's own execution option.
+
+    The notifier's post is a post in *this* topic, so the selection is read
+    from home like any other serving — and the snapshot the plan wrote is
+    still the newest directive, so the run that collects the outputs runs the
+    way the request was asked for.
+    """
+    calls = []
+    wire(monkeypatch, tmp_path, calls,
+         pending={"prompt_id": "b09133ad", "note": "queued"})
+    client = Client(calls, selection=Selection("agy", "topic", 5814))
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+    assert client.state_of("run") == record.RUN_PENDING
+
+    def collecting(workspace, selection=None):
+        calls.append(("generator", workspace, selection))
+        (workspace / "result" / "loop.mp3").write_text("x")
+        (workspace / assetrun_topic.WATCHING_FILE).unlink()
+        return "collected"
+
+    calls.clear()
+    monkeypatch.setattr(assetrun_topic, "run_generator", collecting)
+    client.speak("comfy success b09133ad in 92s", sender_id=21, name="Comfy Notifier")
+    assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
+
+    generator = next(call for call in calls if call[0] == "generator")
+    assert generator[2].option == "agy" and generator[2].source == "inherited"

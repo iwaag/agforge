@@ -5,6 +5,10 @@ project = "agforge"
 
 [models."anthropic/claude-sonnet-5"]
 
+[models."antigravity/gemini-3.8-flash-medium"]
+
+[models."antigravity/claude-sonnet-4-6"]
+
 [profiles.local]
 harness = "agcode"
 model = "ollama/qwen3.8:27b-mlx-bf16"
@@ -16,6 +20,24 @@ model = "anthropic/claude-sonnet-5"
 [profiles.stub]
 harness = "fake"
 model = "ollama/qwen3.8:27b-mlx-bf16"
+
+# Google's Antigravity CLI (`agy`), headless. The catalog is the Antigravity
+# account's — Gemini and Claude alike — so the provider is `antigravity` and
+# the record says which model ran (Agent ≠ Model). The CLI carries its own
+# OAuth token; a run reports tokens, no cost.
+#
+# These are the profiles behind forge's **published execution options**
+# (`instance.PUBLIC_PROFILES`). They change which model reasons about a
+# request and drives the toolsets — never which media model generates the
+# asset: that is chosen in the plan and named in the toolset, and asking for
+# `agy` must not quietly turn a video request into something else.
+[profiles.agy]
+harness = "agy"
+model = "antigravity/gemini-3.8-flash-medium"
+
+[profiles.agy-claude]
+harness = "agy"
+model = "antigravity/claude-sonnet-4-6"
 
 # The front reads and writes text — and runs `agforge toolsets --list`,
 # which its guide tells it to do. `agentchat` is what the entrance serving

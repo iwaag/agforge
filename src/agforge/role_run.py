@@ -19,6 +19,7 @@ from pathlib import Path
 from agag import agent as skeleton
 from agag.agent import AGENTCHAT_ENV_VARIABLE, chat_environment as _chat_environment
 from agag.agent_config import ResolvedAgent, load_config
+from agag.execopt import Selection
 
 from .instance import AGFORGE_ROOT, SPEC as _BARE_SPEC
 
@@ -128,10 +129,18 @@ def run_role(
     record: Path | None = None,
     home: tuple[str, str] | None = None,
     stream: bool = False,
+    selection: Selection | None = None,
 ) -> tuple[str, dict, int]:
-    """Resolve `role`, run it once, and return output, record, and exit code."""
+    """Resolve `role`, run it once, and return output, record, and exit code.
+
+    `selection` is the execution option this serving froze
+    (`ag.exec-options.v1`). It decides the profile when `profile` was not
+    given outright, and the run record carries the public name beside the
+    harness's own `profile`/`harness`/`model` — what was asked for beside
+    what ran.
+    """
     return skeleton.run_role(
         SPEC, role, prompt,
         cwd=cwd, timeout=timeout, profile=profile, transcript=transcript,
-        record=record, home=home, stream=stream,
+        record=record, home=home, stream=stream, selection=selection,
     )

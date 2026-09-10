@@ -48,6 +48,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from agag.document import DocumentError, compose, split
+from agag.execopt import Selection, exec_note
 from agag.zulip import (
     RESOLVED_TOPIC_PREFIX,
     ZulipClient,
@@ -408,7 +409,10 @@ def record_plan(client: ZulipClient, request: Request, plan: str, tools=()) -> R
     return replace(request, plan=document, tools=listed, state=REQUEST_PLANNED)
 
 
-def open_run(client: ZulipClient, request: Request, self_id: int) -> Run:
+def open_run(
+    client: ZulipClient, request: Request, self_id: int,
+    selection: Selection | None = None,
+) -> Run:
     """Open this request's execution conversation and anchor it to two things.
 
     The root note back to the request (the shared convention) and the
@@ -420,6 +424,16 @@ def open_run(client: ZulipClient, request: Request, self_id: int) -> Run:
 
     Idempotent by the run note: planning again finds the topic already
     anchored and only says where it is.
+
+    `selection` is the planning conversation's frozen execution option, and
+    an explicit one is snapshotted here as `[selfnote][exec]`
+    (`ag.exec-options.v1` §5, autolab's move on forge's vocabulary): the run
+    inherits how the plan was asked to be made. A snapshot, not a reference —
+    changing the plan topic later reaches the *next* run topic it opens, and
+    this one is overridden by an ordinary command posted in it, which is
+    newer and therefore wins. Idempotence means the same thing here as for
+    the other notes: a re-plan finds the topic anchored and writes nothing,
+    so a run already under way keeps what it started with.
     """
     topic = request.run_topic
     history = _history(client, request.channel, topic)
@@ -428,6 +442,12 @@ def open_run(client: ZulipClient, request: Request, self_id: int) -> Run:
         return found
     _post(client, request.channel, topic,
           rootchat_note(Conversation(request.channel, request.topic)))
+    if selection is not None and selection.explicit:
+        _post(client, request.channel, topic, exec_note(
+            selection.option,
+            Conversation(request.channel, request.topic),
+            selection.message_id,
+        ))
     # The run note's own id is the run, so it is the one write whose id is kept.
     anchor_id = _post(client, request.channel, topic, run_note(request.anchor_id))
     title = request.title or request.stem

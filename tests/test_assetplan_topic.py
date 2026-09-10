@@ -85,16 +85,16 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
     # the fixture realm records them; only the skeleton's posts come through
     # this name.
 
-    def front_run(prompt, cwd):
-        calls.append(("front", prompt, cwd))
+    def front_run(prompt, cwd, selection=None):
+        calls.append(("front", prompt, cwd, selection))
         if writes_required:
             (cwd / assetplan_topic.REQUIRED_ITEMS).write_text("one bird, blue")
         if toolsets_csv is not None:
             (cwd / assetplan_topic.TOOLSETS_CSV).write_text(toolsets_csv)
         return front
 
-    def generator_run(cwd):
-        calls.append(("generator", cwd))
+    def generator_run(cwd, selection=None):
+        calls.append(("generator", cwd, selection))
         for name, body in writes:
             (cwd / name).write_text(body)
         return generator
@@ -135,17 +135,19 @@ def test_front_only_path_acks_answers_and_stops(monkeypatch, tmp_path):
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
 
     assert [call[0] for call in calls] == [
-        # the ack, the chatlog, the front run, the handoff lookup,
-        # the reply, the post-run re-check
-        "whoami", "write", "history", "front", "history", "write", "history",
+        # who this instance is mentioned by, for the execution-options menu;
+        # then serve_topic's own whoami, the read that comes *before* the ack
+        # so a configuration-only post costs neither, the ack, the front run,
+        # the handoff lookup, the reply, the post-run re-check
+        "whoami", "whoami", "history", "write", "front", "history", "write", "history",
     ]
-    assert calls[1][1:] == (TOPIC, assetplan_topic.SWEEP_ACK)
-    assert calls[5][1:] == (TOPIC, "@**Developer**\n\non it")
+    assert calls[3][1:] == (TOPIC, assetplan_topic.SWEEP_ACK)
+    assert calls[6][1:] == (TOPIC, "@**Developer**\n\non it")
     # The chatlog lands in this generation's front workspace.
     assert (gen_dir(tmp_path, 1, "front") / "chatlog.md").read_text() == (
         "[Developer] make me a bird\n"
     )
-    assert calls[3][2] == gen_dir(tmp_path, 1, "front")
+    assert calls[4][2] == gen_dir(tmp_path, 1, "front")
     assert not (tmp_path / "topics" / CHANNEL / TOPIC / "1" / "generator").exists()
 
 
@@ -176,7 +178,7 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
 
     generator = gen_dir(tmp_path, 1, "generator")
     assert [call[0] for call in calls] == [
-        "whoami", "write", "history", "front", "write", "generator",
+        "whoami", "whoami", "history", "write", "front", "write", "generator",
         # recording the plan: is this conversation anchored already, then the
         # anchor, the plan itself, and the three notes that describe it
         "history", "write", "write", "write", "write", "write",
@@ -189,7 +191,7 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
     ]
     assert (generator / "required_items.md").read_text() == "one bird, blue"
     assert [path.name for path in (generator / "tools").iterdir()] == ["toolset-image.md"]
-    assert calls[5][1] == generator
+    assert calls[6][1] == generator
     # The plan is recorded, the run topic is named, idea.md is relayed
     # verbatim, then the answer.
     request = record.read_request(client, CHANNEL, TOPIC, BOT_ID)
@@ -307,7 +309,7 @@ def test_a_front_failure_names_its_step(monkeypatch, tmp_path):
     calls = []
     wire(monkeypatch, tmp_path, calls)
 
-    def explode(prompt, cwd):
+    def explode(prompt, cwd, selection=None):
         raise assetplan_topic.ListenerError("claude_code timed out")
 
     monkeypatch.setattr(assetplan_topic, "run_front", explode)
@@ -321,7 +323,7 @@ def test_a_generator_failure_names_its_own_step(monkeypatch, tmp_path):
     calls = []
     wire(monkeypatch, tmp_path, calls, writes_required=True)
 
-    def explode(cwd):
+    def explode(cwd, selection=None):
         raise assetplan_topic.ListenerError("no disk space")
 
     monkeypatch.setattr(assetplan_topic, "run_generator", explode)
@@ -453,3 +455,138 @@ def test_a_second_generation_finds_the_run_topic_already_anchored(monkeypatch, t
     assert f"posting in {run_topic} starts it" in written(calls)[-1]
     # A re-plan is the same request with a new document, not a second one.
     assert record.read_request(client, CHANNEL, TOPIC, BOT_ID).anchor_id == request.anchor_id
+
+
+# --- execution options (ag.exec-options.v1, refactor p3 ex1 step 2) --------
+
+from agag import execopt  # noqa: E402
+from agag.execopt import Selection  # noqa: E402
+
+from agforge import instance  # noqa: E402
+
+
+def exec_command(option, bot="Forge"):
+    return f"@**{bot}** use {option}"
+
+
+def test_forge_publishes_only_profiles_it_actually_has(tmp_path):
+    config = tmp_path / "agents.toml"
+    config.write_text(
+        'schema = "ag.agent-config.v2"\n'
+        '[models."antigravity/g"]\n'
+        '[profiles.agy]\nharness = "agy"\nmodel = "antigravity/g"\n',
+        encoding="utf-8",
+    )
+    names = [option.name for option in instance.exec_options(config)]
+    # `agy-claude` is published only where the profile exists, and `stub` is
+    # never published at all: a menu that offers the fake harness lies.
+    assert names == ["default", "agy"]
+
+
+def test_an_unreadable_config_publishes_nothing_rather_than_a_wrong_menu(tmp_path):
+    assert instance.exec_options(tmp_path / "nothing.toml") == ()
+
+
+def test_the_test_only_profiles_stay_off_the_public_menu():
+    published = [name for name, _, _ in instance.PUBLIC_PROFILES]
+    assert "stub" not in published and "sonnet" not in published and "local" not in published
+
+
+def test_every_option_says_it_does_not_choose_the_media_model():
+    # Selecting `agy` changes how forge thinks about a request, never what
+    # the request is for: the media model is named by the plan's toolset.
+    for option in instance.SPEC.published_options("Forge").options:
+        assert "Not the media model" in option.covers
+        assert "generation" in option.covers and "callback" in option.covers
+
+
+def test_a_selection_reaches_the_front_and_the_planning_generator(monkeypatch, tmp_path):
+    calls = []
+    wire(
+        monkeypatch, tmp_path, calls,
+        writes_required=True,
+        writes=(("plan.md", "# Bird\n\nDraw it."),),
+    )
+    client = Client(calls, history=[
+        message(content=exec_command("agy"), id=7),
+        message(content="make me a bird", id=8),
+    ])
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+
+    front = next(call for call in calls if call[0] == "front")
+    generator = next(call for call in calls if call[0] == "generator")
+    assert front[3].option == "agy" and front[3].source == "topic"
+    assert generator[2].option == "agy"
+
+
+def test_the_run_topic_inherits_the_plans_selection(monkeypatch, tmp_path):
+    calls = []
+    wire(
+        monkeypatch, tmp_path, calls,
+        writes_required=True,
+        writes=(("plan.md", "# Bird\n\nDraw it."),),
+    )
+    client = Client(calls, history=[
+        message(content=exec_command("agy"), id=7),
+        message(content="make me a bird", id=8),
+    ])
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+
+    run_topic = client.run_topic()
+    notes = [post["content"] for post in client.histories[(CHANNEL, run_topic)]
+             if post["content"].startswith("[selfnote][exec]")]
+    assert notes == [f"[selfnote][exec] agy from {CHANNEL}/{TOPIC}#7"]
+    option, source, message_id = execopt.parse_exec_note(notes[0])
+    assert option == "agy" and str(source) == f"{CHANNEL}/{TOPIC}" and message_id == 7
+
+
+def test_a_plan_with_no_selection_writes_no_snapshot(monkeypatch, tmp_path):
+    calls = []
+    wire(
+        monkeypatch, tmp_path, calls,
+        writes_required=True,
+        writes=(("plan.md", "# Bird\n\nDraw it."),),
+    )
+    client = Client(calls)
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+    run_topic = client.run_topic()
+    assert not [post for post in client.histories[(CHANNEL, run_topic)]
+                if post["content"].startswith("[selfnote][exec]")]
+
+
+def test_a_configuration_only_post_costs_no_run_and_is_answered(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls)
+    client = Client(calls, history=[message(content=exec_command("agy"), id=7)])
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+
+    assert not [call for call in calls if call[0] in ("front", "generator")]
+    assert "agy" in written(calls)[-1] and "Execution option set" in written(calls)[-1]
+
+
+def test_an_unpublished_option_is_refused_and_never_becomes_the_setting(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls)
+    client = Client(calls, history=[message(content=exec_command("opus"), id=7)])
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+
+    reply = written(calls)[-1]
+    assert "do not publish an execution option named `opus`" in reply
+    assert "`agy`" in reply
+    assert execopt.resolve(
+        client.histories[(CHANNEL, TOPIC)], "Forge",
+        known=instance.SPEC.published_options("Forge").names,
+    ) == Selection()
+
+
+def test_a_reset_returns_the_topic_to_the_configured_defaults(monkeypatch, tmp_path):
+    calls = []
+    wire(monkeypatch, tmp_path, calls)
+    client = Client(calls, history=[
+        message(content=exec_command("agy"), id=7),
+        message(content=exec_command("default"), id=8),
+        message(content="make me a bird", id=9),
+    ])
+    assetplan_topic.handle_topic(client, CHANNEL, TOPIC)
+    front = next(call for call in calls if call[0] == "front")
+    assert front[3].option is None
