@@ -12,7 +12,7 @@ Same rule as the rest of the suite: nothing asserts what an agent said.
 
 import pytest
 from agag import topics
-from agag.topics import GuideError
+from agag.topics import GuideError, conversation_context
 
 from agforge import assetplan_topic, record, toolsets
 
@@ -151,15 +151,23 @@ def test_front_only_path_acks_answers_and_stops(monkeypatch, tmp_path):
     assert not (tmp_path / "topics" / CHANNEL / TOPIC / "1" / "generator").exists()
 
 
-def test_the_front_prompt_is_the_placement_line_plus_its_own_guide(monkeypatch, tmp_path):
+def test_the_front_prompt_carries_the_conversation_then_its_own_guide(monkeypatch, tmp_path):
+    """Since `routine_tests` p2 ex1 the request is **in** the prompt, not only
+    in `chatlog.md`: a reply produced in one turn with no tool calls never
+    opens a file, and Front twice answered a real request as though its
+    conversation were empty. The same repair, from the same shared helper."""
     calls = []
     wire(monkeypatch, tmp_path, calls)
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
     prompt = next(call[1] for call in calls if call[0] == "front")
     assert prompt == (
         "The chatlog is placed in the working directory. "
-        "You are 'Forge' in the chatlog.\n\nFRONT GUIDE"
+        "You are 'Forge' in the chatlog.\n"
+        "\n"
+        + conversation_context("[Developer] make me a bird\n")
+        + "\n\nFRONT GUIDE"
     )
+    assert "make me a bird" in prompt
 
 
 # --- (b) required_items.md present: the generator runs ---------------------

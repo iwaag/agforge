@@ -39,6 +39,7 @@ from agag.topics import (
     TopicResult,
     chatlog_placement,
     chatlog_path,
+    conversation_context,
     format_chatlog,
     generation_dir as shared_generation_dir,
     guide as shared_guide,
@@ -120,10 +121,18 @@ def is_ack(content: str) -> bool:
     return content.startswith(ACK_PREFIX) or content == SWEEP_ACK
 
 
-def front_prompt(bot_name: str) -> str:
-    return prompt_with_guide(
-        [chatlog_placement(bot_name)], guide("assetplan_front", "guide.md")
-    )
+def front_prompt(bot_name: str, conversation: str = "") -> str:
+    """The conversation, its placement line, then the plan front's guide.
+
+    `conversation` is this serving's rendered chatlog, carried in the prompt
+    since `routine_tests` p2 ex1 (`agag.topics.conversation_context`). The
+    request used to reach the run only as a file it had to decide to open;
+    the file is still written and is the complete one.
+    """
+    lines = [chatlog_placement(bot_name)]
+    if conversation:
+        lines += ["", conversation]
+    return prompt_with_guide(lines, guide("assetplan_front", "guide.md"))
 
 
 def _run(
@@ -261,12 +270,15 @@ def serve(context) -> TopicResult:
     """agforge's part of one serving: the front run, then the generator."""
     number = next_generation(topic_workspace(context.channel, context.topic))
     front_dir = generation_dir(context.channel, context.topic, number, "front")
-    chatlog_path(front_dir).write_text(
-        format_chatlog(context.history, context.self_id, drop=is_ack), encoding="utf-8"
-    )
+    # One rendering: the file and the prompt's copy are the same bytes.
+    chatlog = format_chatlog(context.history, context.self_id, drop=is_ack)
+    chatlog_path(front_dir).write_text(chatlog, encoding="utf-8")
 
     context.step = "front"
-    answer = run_front(front_prompt(context.bot_name), front_dir, context.selection)
+    answer = run_front(
+        front_prompt(context.bot_name, conversation_context(chatlog)),
+        front_dir, context.selection,
+    )
 
     if not (front_dir / REQUIRED_ITEMS).is_file():
         # The front has a question, not a spec: no generator run follows, so
