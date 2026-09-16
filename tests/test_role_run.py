@@ -55,7 +55,7 @@ def test_run_role_carries_the_grant_and_writes_its_run_record(monkeypatch, tmp_p
 def test_every_role_carries_a_tool_grant():
     """v2 makes the grant part of the role: a role without one is rejected by
     `load_config`, so this only has to say what the grants are."""
-    assert set(grants()) == {"front", "generator"}
+    assert set(grants()) == {"front", "generator", "argue"}
     assert "Bash(agentchat:*)" in grants()["front"]
 
 

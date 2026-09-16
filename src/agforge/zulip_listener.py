@@ -45,12 +45,16 @@ def dispatch(client: ZulipClient, channel: str, topic: str) -> None:
 
 
 def main() -> None:
+    from .argue import handle_mention
+
     dm_handler = None
     if not log_only(SPEC):
         from .zulip_chat import react  # the DM route: one charter run
 
         dm_handler = react
-    listener_main(SPEC, routes(), dm_handler=dm_handler)
+    # The mention route answers argue invitations only (`agforge.argue`,
+    # `argue` p1); every other mention of this bot is logged and left.
+    listener_main(SPEC, routes(), dm_handler=dm_handler, on_mention=handle_mention)
 
 
 if __name__ == "__main__":

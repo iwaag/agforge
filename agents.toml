@@ -72,3 +72,11 @@ allowed_tools = [
     "Bash(acestudio-cli:*)",
     "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
 ]
+
+# A contribution to an argue (`argue` p1): named in `#argue`, forge answers
+# in place about what media can be made here. Reading tools and the `agforge`
+# CLI for listing toolsets; nothing is planned or generated from an argue.
+[roles.argue]
+profile = "sonnet"
+requires = []
+allowed_tools = "Read,Glob,Grep,Bash(agforge:*)"

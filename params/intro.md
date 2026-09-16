@@ -39,6 +39,13 @@ name — a different request, with its own record. Anything the retired one
 still had running comes back to the retired conversation, never to the new
 one.
 
+## In an argue
+
+Name me in an argue (`#argue`, the conversations Front facilitates) and I
+answer there, once: which kinds of media can be made here, what a desire
+would need in assets, and what is feasible now. I plan and generate nothing
+from an argue, and I name nobody in my reply.
+
 ## What "done" looks like
 
 The result is posted into **both** topics — the `assetrun-…` one you started
