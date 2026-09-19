@@ -12,6 +12,7 @@ Same rule as the rest of the suite: nothing asserts what an agent said.
 
 import pytest
 from agag import topics
+from agag.reply import REPLY_GUIDE
 from agag.topics import GuideError, conversation_context
 
 from agforge import assetplan_topic, record, toolsets
@@ -72,6 +73,15 @@ def written(calls):
     return [call[2] for call in calls if call[0] == "write"]
 
 
+def marked(answer: str) -> str:
+    """A stub run's output under the reply contract (`agag.reply`): the
+    answer inside an `ag-reply` mark after a line of the run's own, unless
+    the test wrote the marks itself."""
+    if "```ag-reply" in answer:
+        return answer
+    return f"thinking about it first.\n\n```ag-reply\n{answer}\n```"
+
+
 def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
          writes_required=False, writes=(), toolsets_csv=None):
     monkeypatch.setattr(assetplan_topic, "TOPICS_ROOT", tmp_path / "topics")
@@ -81,6 +91,8 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
         calls.append(("write", topic, text)) or "success"
     )
     monkeypatch.setattr(topics, "topic_write", writer)
+    monkeypatch.setattr(topics, "deliver", lambda client, channel, topic, text, **kwargs: (
+        calls.append(("write", topic, text)) or 900))
     # The record's own writes go through the client (`send_to_channel`), so
     # the fixture realm records them; only the skeleton's posts come through
     # this name.
@@ -91,7 +103,7 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
             (cwd / assetplan_topic.REQUIRED_ITEMS).write_text("one bird, blue")
         if toolsets_csv is not None:
             (cwd / assetplan_topic.TOOLSETS_CSV).write_text(toolsets_csv)
-        return front
+        return marked(front)
 
     def generator_run(cwd, selection=None):
         calls.append(("generator", cwd, selection))
@@ -138,11 +150,11 @@ def test_front_only_path_acks_answers_and_stops(monkeypatch, tmp_path):
         # who this instance is mentioned by, for the execution-options menu;
         # then serve_topic's own whoami, the read that comes *before* the ack
         # so a configuration-only post costs neither, the ack, the front run,
-        # the handoff lookup, the reply, the post-run re-check
-        "whoami", "whoami", "history", "write", "front", "history", "write", "history",
+        # the reply, the post-run re-check
+        "whoami", "whoami", "history", "write", "front", "write", "history",
     ]
     assert calls[3][1:] == (TOPIC, assetplan_topic.SWEEP_ACK)
-    assert calls[6][1:] == (TOPIC, "@**Developer**\n\non it")
+    assert calls[5][1:] == (TOPIC, "@**Developer**\n\non it")
     # The chatlog lands in this generation's front workspace.
     assert (gen_dir(tmp_path, 1, "front") / "chatlog.md").read_text() == (
         "[Developer] make me a bird\n"
@@ -166,6 +178,7 @@ def test_the_front_prompt_carries_the_conversation_then_its_own_guide(monkeypatc
         "\n"
         + conversation_context("[Developer] make me a bird\n")
         + "\n\nFRONT GUIDE"
+        + f"\n\n{REPLY_GUIDE}"
     )
     assert "make me a bird" in prompt
 
@@ -194,8 +207,9 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
         # topic that comes back empty is read again under its ✔ name — then
         # the two selfnotes and the one visible line
         "history", "history", "write", "write", "write",
-        # the handoff lookup, the reply, then the post-run re-check
-        "history", "write", "history",
+        # the reply (the requester is read from the processed input, not
+        # looked up at send time), then the post-run re-check
+        "write", "history",
     ]
     assert (generator / "required_items.md").read_text() == "one bird, blue"
     assert [path.name for path in (generator / "tools").iterdir()] == ["toolset-image.md"]

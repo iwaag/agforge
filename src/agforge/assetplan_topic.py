@@ -34,6 +34,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from agag.reply import repair_with, resolve_reply
 from agag.topics import (
     GuideError,
     TopicResult,
@@ -132,7 +133,7 @@ def front_prompt(bot_name: str, conversation: str = "") -> str:
     lines = [chatlog_placement(bot_name)]
     if conversation:
         lines += ["", conversation]
-    return prompt_with_guide(lines, guide("assetplan_front", "guide.md"))
+    return prompt_with_guide(lines, guide("assetplan_front", "guide.md"), reply=True)
 
 
 def _run(
@@ -275,10 +276,11 @@ def serve(context) -> TopicResult:
     chatlog_path(front_dir).write_text(chatlog, encoding="utf-8")
 
     context.step = "front"
-    answer = run_front(
+    output = run_front(
         front_prompt(context.bot_name, conversation_context(chatlog)),
         front_dir, context.selection,
     )
+    repair = repair_with(lambda again: run_front(again, front_dir, context.selection), output)
 
     if not (front_dir / REQUIRED_ITEMS).is_file():
         # The front has a question, not a spec: no generator run follows, so
@@ -288,11 +290,16 @@ def serve(context) -> TopicResult:
         # requester unnamed, and a requester who is not named is never
         # brought back: `agent_standardize` p9 watched an exchange stop dead
         # on exactly this, with forge asking a question nobody was told about.
-        return TopicResult([answer])
+        # The reply contract (`agag.reply`) decides what of the output is said.
+        return TopicResult(output=output, repair=repair)
 
     # Posted on its own, before the generator run: the front's answer is the
     # conversational reply, and the generator can take minutes. Here the
     # registration that follows is the reply, and is what names the requester.
+    answer, split, _ = resolve_reply(output, repair, log=log)
+    journal = getattr(context, "journal", None)
+    if journal is not None:
+        journal.reply_outcome(marked=split.marked, blocks=split.blocks, failure=split.error or "")
     context.post(answer)
 
     context.step = "generator"
