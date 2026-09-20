@@ -306,6 +306,7 @@ def run_generator(workspace: Path, selection: Selection | None = None) -> str:
         cwd=workspace,
         timeout=ASSETRUN_TIMEOUT_SECONDS,
         record=record,
+        transcript=record.with_suffix(".jsonl"), stream=True,
         selection=selection,
     )
     if exit_code != 0:

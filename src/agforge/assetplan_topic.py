@@ -141,8 +141,12 @@ def _run(
     selection: Selection | None = None,
 ) -> str:
     record = next_record_path(RECORDS_ROOT / role)
+    # The streamed transcript beside the record: a plan that cites a
+    # knowledge source is checkable only if what the run searched and read
+    # is kept (`study_import` p1 step 5).
     output, _, exit_code = run_role(
         role, prompt, cwd=cwd, timeout=timeout, record=record, selection=selection,
+        transcript=record.with_suffix(".jsonl"), stream=True,
     )
     if exit_code != 0:
         raise ListenerError(f"{role} run exited {exit_code}: {output.strip()[:500]}")
