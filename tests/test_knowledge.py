@@ -194,3 +194,41 @@ def test_the_run_workspace_says_whether_the_knowledge_moved():
     assert "Moved since the plan: localize bbb -> ccc" in moved
     assert "predates" in assetrun_topic.knowledge_summary(None, "mediagen@aaa")
     assert "No knowledge source was configured" in assetrun_topic.knowledge_summary("", "")
+
+
+# --- the hand-over through the two topic flows ----------------------------------
+
+
+def test_the_plan_registration_says_what_it_was_made_against(monkeypatch, tmp_path):
+    """The requester sees the stamp in the registration line, and the run
+    topic's workspace gets `knowledge.md` built from the same record."""
+    import test_assetplan_topic as plan_flow
+    import test_assetrun_topic as run_flow
+
+    calls = []
+    plan_flow.wire(
+        monkeypatch, tmp_path, calls, writes_required=True,
+        toolsets_csv="toolset-image\n", writes=(("plan.md", "# Icons\n\nFive."),),
+    )
+    monkeypatch.setattr(knowledge, "CONFIG_PATH", library(tmp_path))
+    client = plan_flow.Client(calls)
+    from agforge import assetplan_topic
+    assetplan_topic.handle_topic(client, plan_flow.CHANNEL, plan_flow.TOPIC)
+    request = record.read_request(client, plan_flow.CHANNEL, plan_flow.TOPIC, BOT_ID)
+    assert knowledge.parse_stamp(request.knowledge).keys() == {"mediagen", "localize"}
+    assert f"knowledge: {request.knowledge}" in plan_flow.written(calls)[-1]
+
+    summary = assetrun_topic.knowledge_summary(request.knowledge)
+    assert f"Planned against: {request.knowledge}" in summary
+
+
+def test_the_run_workspace_carries_the_stamp_the_plan_recorded(monkeypatch, tmp_path):
+    import test_assetrun_topic as run_flow
+
+    calls = []
+    run_flow.wire(monkeypatch, tmp_path, calls)
+    client = run_flow.Client(calls)
+    assetrun_topic.handle_assetrun(client, run_flow.CHANNEL, client.topic)
+    text = (run_flow.ws(tmp_path, client) / assetrun_topic.KNOWLEDGE_FILE).read_text()
+    assert text.startswith("# Knowledge this plan was made against")
+    assert "agforge knowledge list|show|search|path" in text
