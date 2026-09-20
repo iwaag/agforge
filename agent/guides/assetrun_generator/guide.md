@@ -11,8 +11,12 @@ another one there; say in your report what you actually used.
 Put all final products inside "result/" folder.
 Put all intermediate products inside "intermediate/" folder.
 If failed, create empty "failure.flag" file. Say in your report what failed,
-what would have to change (in the requirement, the environment or the
-knowledge) for it to work, and any alternative you can see.
+what would have to change for it to work, and any alternative you can see.
+Name the kind of change, because the requester routes it and you cannot:
+an environment problem (a library, service or model missing or unreachable),
+an implementation problem (a localised script or its README is wrong), or a
+knowledge gap (nothing known covers this); the localised source's own README
+says where each kind goes.
 
 A video or music generation takes minutes. Do not sit through it and do not
 poll: `agforge video submit` and `agforge music submit` queue the same job

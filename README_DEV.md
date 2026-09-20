@@ -246,6 +246,26 @@ model, outcome, duration, and usage/cost when reported.
 
 Actual values for this environment: `.local/.env`, `.local/devenv.md`.
 
+## Re-verifying a capability
+
+Knowledge is only as good as its last check. When a model, a workflow, a
+dependency or this environment changes, or a run fails on something the
+`localize` README calls verified:
+
+1. `agforge knowledge list` — read the row's state and "last verified"
+   date; a `verified` row older than the change is suspect.
+2. Re-run that capability's own proof, as its README says (for
+   `hud_icons`: build into a scratch directory, `judge.py`, hash check).
+3. Route what you find, as the `localize` README says: environment →
+   the cluster agent (`cagent-agstudio1`); a localised script or README →
+   a `workplan-` in `#pj-mediagen` (autolab); a general finding missing
+   from `main/` → the same channel, as a tip for the subject. forge's own
+   code and guides → this repository, `uv run pytest -q`.
+
+forge never edits a knowledge source; a fruit a run draws for a request
+stays in that run's workspace until somebody carries it into `localize/`
+through that route (`study_import` p1 step 5 left one such case).
+
 ## Safety devices
 
 Two, both guarding irreversible harm rather than mistakes: `generate.py`

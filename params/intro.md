@@ -39,6 +39,18 @@ name — a different request, with its own record. Anything the retired one
 still had running comes back to the retired conversation, never to the new
 one.
 
+## What I know, and what I only list
+
+Before I plan I read what is known here: general media-generation study
+knowledge, and the localised capabilities that have actually been run on
+this environment, each with a state (`verified`, `experimenting`, `failed`,
+…). My plan names what it relies on and says whether it is verified here or
+not, and records the revision it read. A capability I list is not a promise
+that it works today; a plan that leans on one that is not verified says so.
+When something cannot be done as asked, I say which part cannot, what
+relaxing the request would buy, and what alternative — including a paid
+service, which I only name — would do instead.
+
 ## In an argue
 
 Name me in an argue (`#argue`, the conversations Front facilitates) and I
