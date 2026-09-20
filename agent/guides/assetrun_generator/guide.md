@@ -2,9 +2,17 @@ Do what described in "plan.md" using whatever described in files in "tools/" fol
 "chatlog.md" is the conversation that started this run. Its last message is
 what the person who started it asked for now: follow it where it says
 something more specific than the plan, and ignore it where it says nothing.
+"knowledge.md" says which knowledge sources and revisions the plan was made
+against and whether they have moved since. `agforge knowledge show <source>/<path>`
+reads any of them now, `agforge knowledge search <terms>` finds lines, and
+`agforge knowledge path <source>/<path>` is where a localised script lives so
+you can run it in place. If the plan's approach fails, you may look for
+another one there; say in your report what you actually used.
 Put all final products inside "result/" folder.
 Put all intermediate products inside "intermediate/" folder.
-If failed, create empty "failure.flag" file.
+If failed, create empty "failure.flag" file. Say in your report what failed,
+what would have to change (in the requirement, the environment or the
+knowledge) for it to work, and any alternative you can see.
 
 A video or music generation takes minutes. Do not sit through it and do not
 poll: `agforge video submit` and `agforge music submit` queue the same job

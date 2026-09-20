@@ -34,6 +34,20 @@ workspace root).
     `.local/resources/comfywf/video/`) → the same delivery contract. One
     5-second clip with sound; the prompt is the only parameter, and a run
     takes minutes.
+  - `agforge knowledge list | show <source>/<path> | search <terms…> | path
+    <source>[/<path>]` — the knowledge sources configured in the ignored
+    `.local/knowledge.toml` (`knowledge.example.toml` is the shape): a
+    `general` source (mediagen's `main/`: what a model or workflow is and
+    what tests found, publish-ready) and a `local` one (mediagen's
+    `localize/`: what runs here, how, in what state). `list` prints every
+    index row whole, unverified rows with their state; nothing is
+    pre-selected. All four verbs go through the `agforge` CLI on purpose:
+    a role granted `Bash(agforge:*)` reaches every file without a Read
+    grant outside its workspace, on any harness. `src/agforge/knowledge.py`
+    is the one reader. The plan records what it was made against as a
+    `[selfnote][knowledge] mediagen@<rev>, localize@<rev>` note beside
+    `[tools]`, and the run workspace gets `knowledge.md` saying whether a
+    source moved since (`study_import` p1).
 - `agent/toolsets/toolset-*.md` — one document per toolset, opening with a
   `# Description` section. They are the generator's tool vocabulary, and the
   unit the whole assetplan flow moves around: the front's `toolsets.csv`
@@ -123,6 +137,7 @@ note vocabulary:
     [selfnote][asset] <stem>            in an assetplan- topic  → the request
     [selfnote][doc] <message id>        which post is the current plan
     [selfnote][tools] <names>           the toolsets it was planned with
+    [selfnote][knowledge] <stamp>       the knowledge sources and revisions it read
     [selfnote][assetrun] <request id>   in an assetrun- topic   → the run
     [selfnote][state] <word>            planned/delivered/failed/retired
     [selfnote][result] <object key>     one durable asset it produced

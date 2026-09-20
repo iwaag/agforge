@@ -66,6 +66,7 @@ from .anchor import (
     own_replaces,
     own_run,
     own_state,
+    own_knowledge,
     own_tools,
     replaces_note,
     result_note,
@@ -73,6 +74,7 @@ from .anchor import (
     rootchat_note,
     run_note,
     state_note,
+    knowledge_note,
     tools_note,
 )
 
@@ -232,6 +234,9 @@ class Request:
     #: selection, which is answered with the whole library; `[]` means the
     #: selection was none.
     tools: list[str] | None = None
+    #: The knowledge stamp it was planned against (`mediagen@c415b0c, …`).
+    #: `None` means nobody recorded one; `""` means none was configured.
+    knowledge: str | None = None
     state: str = REQUEST_PLANNED
     replaces: int | None = None
     #: Object keys this request has delivered, oldest first.
@@ -305,6 +310,7 @@ def read_request(
         topic=bare_topic(topic),
         plan=_document_from(messages, self_id),
         tools=own_tools(messages, self_id),
+        knowledge=own_knowledge(messages, self_id),
         state=own_state(messages, self_id) or REQUEST_PLANNED,
         replaces=own_replaces(messages, self_id),
         results=tuple(results_in(messages, self_id)),
@@ -381,13 +387,16 @@ def _post(client: ZulipClient, channel: str, topic: str, text: str) -> int:
         raise RecordError(f"could not write to {channel}/{live}: {error}") from error
 
 
-def record_plan(client: ZulipClient, request: Request, plan: str, tools=()) -> Request:
+def record_plan(
+    client: ZulipClient, request: Request, plan: str, tools=(), knowledge: str = "",
+) -> Request:
     """Post one plan as this request's current document, with its toolsets.
 
-    Three writes, in this order and for this reason: the plan is visible
+    Four writes, in this order and for this reason: the plan is visible
     prose because that is what the requester reads; `[doc]` names it so a
-    re-plan does not leave two candidates; `[tools]` is written beside it
-    every time, so the pair can never be half-updated.
+    re-plan does not leave two candidates; `[tools]` and `[knowledge]` are
+    written beside it every time, so the set can never be half-updated —
+    the knowledge stamp says which revision of each source the plan read.
 
     Registering the same plan again is a new post and a new `[doc]` note —
     the old one stays where it was, which is the history of the request.
@@ -405,8 +414,12 @@ def record_plan(client: ZulipClient, request: Request, plan: str, tools=()) -> R
     _post(client, request.channel, request.topic, doc_note(doc_id))
     listed = [str(name).strip() for name in tools if str(name).strip()]
     _post(client, request.channel, request.topic, tools_note(listed))
+    _post(client, request.channel, request.topic, knowledge_note(knowledge))
     _post(client, request.channel, request.topic, state_note(REQUEST_PLANNED))
-    return replace(request, plan=document, tools=listed, state=REQUEST_PLANNED)
+    return replace(
+        request, plan=document, tools=listed, knowledge=knowledge.strip(),
+        state=REQUEST_PLANNED,
+    )
 
 
 def open_run(

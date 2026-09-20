@@ -6,6 +6,10 @@ The subcommands are the vocabulary the toolset documents in
 `agent/toolsets/` describe:
 
     agforge toolsets --list       what toolsets exist, one line each
+    agforge knowledge list        every knowledge source, its revision, its index
+    agforge knowledge show <source>/<path>   one file of it (or a directory)
+    agforge knowledge search <terms…>        lines matching every term
+    agforge knowledge path <source>[/<path>] where it is on disk, to run a script
     agforge image generate "…"    SwarmUI  → presigned URL on the last line
     agforge video generate --prompt "…"   ComfyUI → the same contract
     agforge music generate --prompt "…"   ComfyUI → the same contract
@@ -21,7 +25,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import comfy_async, comfy_music, comfy_video, generate, toolsets as toolsets_module
+from . import comfy_async, comfy_music, comfy_video, generate, knowledge, toolsets as toolsets_module
 
 __all__ = ["build_parser", "main"]
 
@@ -39,6 +43,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="print one 'name, description' line per toolset",
     )
     toolsets.set_defaults(run=_run_toolsets, parser=toolsets)
+
+    know = commands.add_parser(
+        "knowledge", help="what is known about making media, and where",
+        description="Search, read and cite the knowledge sources configured "
+                    "on this host: general study knowledge (what a model or "
+                    "workflow is and what tests found) and its localised form "
+                    "(what runs here, how, and in what state). An index row "
+                    "says its own state; unverified entries are listed too.",
+    )
+    know_actions = know.add_subparsers(dest="action", required=True)
+    know_list = know_actions.add_parser(
+        "list", help="every source, its revision and its index rows",
+        description="Print every configured source with its git revision and "
+                    "the rows of its INDEX.md files, whole. Read it first, "
+                    "then `show` what looks relevant.",
+    )
+    know_list.set_defaults(run=_run_knowledge_list, parser=know_list)
+    know_show = know_actions.add_parser(
+        "show", help="print one file, or list a directory",
+        description="Print `<source>/<relative path>` as text; a directory "
+                    "lists its entries. Nothing outside a source is reachable.",
+    )
+    know_show.add_argument("ref", help="<source>/<relative path>, e.g. localize/hud_icons/README.md")
+    know_show.set_defaults(run=_run_knowledge_show, parser=know_show)
+    know_search = know_actions.add_parser(
+        "search", help="lines matching every term, across all sources",
+        description="Case-insensitive; every term must be on the line. "
+                    "Prints `<source>/<path>:<line>: <text>`, bounded.",
+    )
+    know_search.add_argument("terms", nargs="+", help="words to look for")
+    know_search.set_defaults(run=_run_knowledge_search, parser=know_search)
+    know_path = know_actions.add_parser(
+        "path", help="absolute path of a source or a file in it",
+        description="Where `<source>[/<relative path>]` is on disk, for "
+                    "running a localised script in place, e.g. "
+                    "`uv run --with pillow python \"$(agforge knowledge path "
+                    "localize/hud_icons/make_icons.py)\" --help`.",
+    )
+    know_path.add_argument("ref", help="<source>[/<relative path>]")
+    know_path.set_defaults(run=_run_knowledge_path, parser=know_path)
 
     image = commands.add_parser("image", help="image generation")
     image_actions = image.add_subparsers(dest="action", required=True)
@@ -117,6 +161,29 @@ def _run_toolsets(args: argparse.Namespace) -> None:
         args.parser.error("nothing to do: pass --list")
     for line in toolsets_module.listing():
         print(line)
+
+
+def _run_knowledge_list(args: argparse.Namespace) -> None:
+    print(knowledge.listing())
+
+
+def _run_knowledge_show(args: argparse.Namespace) -> None:
+    try:
+        print(knowledge.show(args.ref))
+    except knowledge.KnowledgeError as error:
+        args.parser.error(str(error))
+
+
+def _run_knowledge_search(args: argparse.Namespace) -> None:
+    hits = knowledge.search(args.terms)
+    print("\n".join(hits) if hits else "no line holds every term; try fewer or other words")
+
+
+def _run_knowledge_path(args: argparse.Namespace) -> None:
+    try:
+        print(knowledge.path_of(args.ref))
+    except knowledge.KnowledgeError as error:
+        args.parser.error(str(error))
 
 
 def _run_image_generate(args: argparse.Namespace) -> None:

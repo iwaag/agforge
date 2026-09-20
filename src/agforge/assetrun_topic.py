@@ -87,7 +87,7 @@ from agag.execopt import Selection
 from agag.selfnote import is_selfnote
 from agag.zulip import ZulipClient, live_topic_name, log, topic_write
 
-from . import generate, toolsets
+from . import knowledge, generate, toolsets
 from .record import (
     REQUEST_DELIVERED,
     REQUEST_FAILED,
@@ -112,6 +112,7 @@ GUIDES = AGFORGE_ROOT / "agent" / "guides"
 RECORDS_ROOT = AGFORGE_ROOT / ".local" / "agent"
 
 TOOLS_DIR = "tools"
+KNOWLEDGE_FILE = "knowledge.md"
 
 # The generator's own verdict on its run, from `assetrun_generator/guide.md`.
 # The exit code stays the first-class failure signal; this is the agent
@@ -253,11 +254,41 @@ def prepare_workspace(request: Request, run: Run | str, collecting: bool = False
             toolsets.names() if request.tools is None else request.tools,
             workspace / TOOLS_DIR,
         )
+        (workspace / KNOWLEDGE_FILE).write_text(
+            knowledge_summary(request.knowledge), encoding="utf-8")
     (workspace / FAILURE_FLAG).unlink(missing_ok=True)
     (workspace / PENDING_FILE).unlink(missing_ok=True)
     (workspace / "result").mkdir(exist_ok=True)
     (workspace / "intermediate").mkdir(exist_ok=True)
     return workspace
+
+
+def knowledge_summary(planned: str | None, current: str | None = None) -> str:
+    """`knowledge.md`: what the plan was made against, and whether it moved.
+
+    The run reads the sources live through `agforge knowledge`; this file
+    is the record of which revision the plan cited, so a difference is
+    visible to the generator and to whoever reads the workspace afterwards.
+    """
+    now = knowledge.stamp() if current is None else current
+    lines = ["# Knowledge this plan was made against", ""]
+    if planned is None:
+        lines.append("No knowledge stamp was recorded with this plan (it predates the record).")
+    elif not planned:
+        lines.append("No knowledge source was configured when this plan was made.")
+    else:
+        lines.append(f"Planned against: {planned}")
+    lines.append(f"Available now:   {now or 'none configured'}")
+    then, here = knowledge.parse_stamp(planned), knowledge.parse_stamp(now)
+    moved = [name for name, rev in then.items() if here.get(name) not in (None, rev)]
+    if moved:
+        lines.append(
+            "Moved since the plan: " + ", ".join(f"{n} {then[n]} -> {here[n]}" for n in moved)
+            + ". The plan stands; `agforge knowledge show <source>/<path>` reads the current "
+            "text, and your report should say if you used something newer than the plan cites."
+        )
+    lines += ["", "`agforge knowledge list|show|search|path` reaches every source."]
+    return "\n".join(lines) + "\n"
 
 
 def run_generator(workspace: Path, selection: Selection | None = None) -> str:

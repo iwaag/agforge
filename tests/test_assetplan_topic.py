@@ -15,7 +15,7 @@ from agag import topics
 from agag.reply import REPLY_GUIDE
 from agag.topics import GuideError, conversation_context
 
-from agforge import assetplan_topic, record, toolsets
+from agforge import assetplan_topic, knowledge, record, toolsets
 
 from realm import BOT_ID, HUMAN_ID, Realm
 
@@ -124,6 +124,8 @@ def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
     (library / "toolset-image.md").write_text("# Description\nImages\n\n# Image Tools\n")
     (library / "toolset-video.md").write_text("# Description\nVideo\n\n# Video Tools\n")
     monkeypatch.setattr(toolsets, "TOOLSETS_DIR", library)
+    # No host knowledge config: the stamp a test plan records is "none".
+    monkeypatch.setattr(knowledge, "CONFIG_PATH", tmp_path / "no-knowledge.toml")
 
 
 def gen_dir(tmp_path, number, role):
@@ -201,8 +203,8 @@ def test_required_items_builds_the_generator_workspace_and_runs_it(monkeypatch, 
     assert [call[0] for call in calls] == [
         "whoami", "whoami", "history", "write", "front", "write", "generator",
         # recording the plan: is this conversation anchored already, then the
-        # anchor, the plan itself, and the three notes that describe it
-        "history", "write", "write", "write", "write", "write",
+        # anchor, the plan itself, and the four notes that describe it
+        "history", "write", "write", "write", "write", "write", "write",
         # opening the request's own run topic: read it — twice, because a
         # topic that comes back empty is read again under its ✔ name — then
         # the two selfnotes and the one visible line

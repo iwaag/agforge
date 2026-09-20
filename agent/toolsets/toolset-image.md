@@ -19,3 +19,17 @@ Call thse by the bare name.
   an alpha channel is really there).
 - `jq` — for reading any JSON you produce or fetch.
 
+# Knowledge
+
+- `agforge knowledge list` — what is known about making images here: general
+  study knowledge and the localised capabilities that run on this
+  environment, each with a state. `agforge knowledge show <source>/<path>`
+  reads one file; `agforge knowledge search <terms>` finds lines.
+- A localised capability is a folder with a README saying how to run it.
+  Run its script in place: `uv run --with pillow --with numpy --with requests
+  python "$(agforge knowledge path localize/<folder>/<script>.py)" --help`.
+  The README says which packages it needs. Host-specific values it reads
+  live beside it in its own ignored config; you do not need to know them.
+- `agforge image generate` is one way to get an image (SwarmUI, the default
+  checkpoint). A localised capability may drive ComfyUI directly with other
+  checkpoints; its README says which.

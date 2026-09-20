@@ -19,7 +19,7 @@ import json
 import pytest
 from agag import topics
 
-from agforge import assetrun_topic, record, toolsets, zulip_listener
+from agforge import assetrun_topic, knowledge, record, toolsets, zulip_listener
 
 from realm import BOT_ID, HUMAN_ID, Realm
 
@@ -102,6 +102,8 @@ def wire(monkeypatch, tmp_path, calls, *, answer="made it",
     (library / "toolset-image.md").write_text("# Description\nImages\n")
     (library / "toolset-video.md").write_text("# Description\nVideo\n")
     monkeypatch.setattr(toolsets, "TOOLSETS_DIR", library)
+    # No host knowledge config: the stamp a test plan records is "none".
+    monkeypatch.setattr(knowledge, "CONFIG_PATH", tmp_path / "no-knowledge.toml")
     monkeypatch.setattr(assetrun_topic, "RECORDS_ROOT", tmp_path / "records")
     writer = lambda topic, text, **kwargs: (
         calls.append(("write", topic, text)) or "success"

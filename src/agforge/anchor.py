@@ -51,6 +51,7 @@ ASSET_TAG = "asset"
 RUN_TAG = "assetrun"
 DOC_TAG = "doc"
 TOOLS_TAG = "tools"
+KNOWLEDGE_TAG = "knowledge"
 STATE_TAG = "state"
 RESULT_TAG = "result"
 REPLACES_TAG = "replaces"
@@ -65,6 +66,7 @@ NO_TOOLS = "-"
 __all__ = [
     "ASSET_TAG",
     "DOC_TAG",
+    "KNOWLEDGE_TAG",
     "EXTERNAL_STATES",
     "NO_TOOLS",
     "REPLACES_TAG",
@@ -75,8 +77,10 @@ __all__ = [
     "Conversation",
     "asset_note",
     "doc_note",
+    "knowledge_note",
     "own_asset",
     "own_doc",
+    "own_knowledge",
     "own_replaces",
     "own_rootchat",
     "own_run",
@@ -84,6 +88,7 @@ __all__ = [
     "own_tools",
     "parse_asset",
     "parse_doc",
+    "parse_knowledge",
     "parse_replaces",
     "parse_result",
     "parse_run",
@@ -172,6 +177,26 @@ def parse_tools(content) -> list[str] | None:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def knowledge_note(stamp: str) -> str:
+    """`[selfnote][knowledge] mediagen@c415b0c, localize@24caf95` — what it was planned against.
+
+    Written beside the plan like `[tools]`, every time a plan is posted. The
+    value is `knowledge.stamp()`: each configured source at the revision it
+    was at when the plan was made, so the run that executes the plan later
+    can say what has moved since. An empty stamp (no sources configured)
+    is written as `-`, the same "recorded as none" the tools note uses.
+    """
+    return note(KNOWLEDGE_TAG, stamp.strip() or NO_TOOLS)
+
+
+def parse_knowledge(content) -> str | None:
+    """The stamp a knowledge note carries (`""` for none), or None otherwise."""
+    value = parse_note(content, KNOWLEDGE_TAG)
+    if value is None:
+        return None
+    return "" if value.strip() == NO_TOOLS else value.strip()
+
+
 def state_note(state: str) -> str:
     """`[selfnote][state] <word>` — where this conversation has got to."""
     return note(STATE_TAG, str(state).strip())
@@ -256,6 +281,10 @@ def own_doc(messages, self_id: int) -> int | None:
 
 def own_tools(messages, self_id: int) -> list[str] | None:
     return _newest(messages, self_id, parse_tools)
+
+
+def own_knowledge(messages, self_id: int) -> str | None:
+    return _newest(messages, self_id, parse_knowledge)
 
 
 #: The state word somebody **other than this bot** may write. Every other

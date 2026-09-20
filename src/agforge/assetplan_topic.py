@@ -54,7 +54,7 @@ from agag.agent import exec_options_for
 from agag.execopt import Selection
 from agag.zulip import ZulipClient, log
 
-from . import toolsets
+from . import knowledge, toolsets
 from .record import (
     ASSETPLAN_TOPIC_PREFIX,
     ASSETRUN_TOPIC_PREFIX,
@@ -179,13 +179,14 @@ def register_plan(
     try:
         request = ensure_request(client, channel, topic, self_id)
         document = plan.read_text(encoding="utf-8")
-        request = record_plan(client, request, document, tools)
+        request = record_plan(client, request, document, tools, knowledge.stamp())
     except RecordError as error:
         # This module's own error, so the handler's one discipline covers a
         # plan that is not a document and a realm that refused the post alike.
         raise ListenerError(str(error)) from error
     listed = ", ".join(request.tools or []) or "none"
-    return request, f'recorded {request.label} "{request.title}" (toolsets: {listed})'
+    against = f"; knowledge: {request.knowledge}" if request.knowledge else ""
+    return request, f'recorded {request.label} "{request.title}" (toolsets: {listed}{against})'
 
 
 def open_assetrun(

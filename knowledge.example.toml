@@ -1,0 +1,27 @@
+# Copy to .local/knowledge.toml and point each source at its checkout.
+#
+# A source is a directory of knowledge a run may search, read and cite
+# through `agforge knowledge …` (src/agforge/knowledge.py). Two kinds:
+#
+#   general — publish-ready study knowledge with no host facts in it
+#             (mediagen's `main/`: what a model or workflow is, what tests
+#             found, what is still open)
+#   local   — the localised form that actually runs here (mediagen's
+#             `localize/`: scripts, verified settings, what failed on this
+#             host, alternatives), with its own INDEX of capabilities and
+#             their state
+#
+# Paths are host facts and belong only in the ignored copy.
+schema = "agforge.knowledge.v1"
+
+[[source]]
+name = "mediagen"
+kind = "general"
+path = "<path to the mediagen study's main/ checkout>"
+about = "general media-generation knowledge: one subject per model or workflow family, summary.md (what it is) and tips.md (what our tests found); publish-ready, no host facts"
+
+[[source]]
+name = "localize"
+kind = "local"
+path = "<path to the mediagen study's localize/ checkout>"
+about = "mediagen knowledge made runnable on this environment: INDEX.md rows are capabilities with a state (planned/experimenting/verified/failed/retired); each folder's README says how to run it and what it cannot do"
