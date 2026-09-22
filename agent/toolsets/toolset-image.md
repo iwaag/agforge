@@ -6,8 +6,13 @@ General image generation & editing tools
 Call thse by the bare name.
 
 - `agforge image generate [--model NAME] [--width W --height H] [--steps N]
-  [--cfgscale N] [--seed N] [--ttl MINUTES] "<prompt>"` — generates one
-  image and returns time-limited download URL as its final line;
+  [--cfgscale N] [--seed N] [--ttl MINUTES] [--init-image PATH
+  --init-creativity F] "<prompt>"` — generates one image and returns
+  time-limited download URL as its final line. `--init-image` starts from a
+  reference image (image-to-image): its composition, framing and palette
+  steer the result and the prompt says what changes; `--init-creativity`
+  is how far to depart from it (0 keeps it, 1 ignores it, default 0.6).
+  A published reference's file is `agrefs path <source>@<rev>:<path>`.
 - Standard file writing inside your cwd is allowed.
 - `curl -sL "<url>" -o name.png` — fetch a generated image into your cwd so
   you can work on it.

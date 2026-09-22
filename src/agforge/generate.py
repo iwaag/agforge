@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import mimetypes
 import sys
 import tomllib
 import uuid
@@ -85,7 +87,29 @@ def resolve_params(
     return params
 
 
-def generate_image(swarmui_url: str, prompt: str, params: dict[str, str]) -> Path:
+def init_image_payload(path: Path, creativity: float) -> dict[str, object]:
+    """SwarmUI's image-to-image inputs: the reference as a data URL, and how far
+    to depart from it (`initimagecreativity`, 0 = copy it, 1 = ignore it).
+
+    This is how a human's composition steers a generation instead of a prompt
+    alone describing it: the reference bytes go in, the prompt says what
+    changes. The caller names the file (`agrefs path <source>@<rev>:<path>`
+    is where a published reference lives).
+    """
+    if not 0.0 <= creativity <= 1.0:
+        sys.exit("--init-creativity is a fraction between 0 and 1")
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        sys.exit(f"cannot read --init-image {path}: {error}")
+    kind = mimetypes.guess_type(path.name)[0] or "image/png"
+    encoded = base64.b64encode(data).decode("ascii")
+    return {"initimage": f"data:{kind};base64,{encoded}", "initimagecreativity": creativity}
+
+
+def generate_image(
+    swarmui_url: str, prompt: str, params: dict[str, str], extra: dict[str, object] | None = None
+) -> Path:
     base = swarmui_url.rstrip("/")
     session = requests.post(f"{base}/API/GetNewSession", json={}, timeout=30)
     session.raise_for_status()
@@ -93,6 +117,7 @@ def generate_image(swarmui_url: str, prompt: str, params: dict[str, str]) -> Pat
 
     payload = {"session_id": session_id, "prompt": prompt, "images": 1}
     payload.update(params)
+    payload.update(extra or {})
     response = requests.post(f"{base}/API/GenerateText2Image", json=payload, timeout=600)
     response.raise_for_status()
     data = response.json()
@@ -217,6 +242,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--steps", help="overrides defaults.toml / .local/.env")
     parser.add_argument("--cfgscale", help="overrides defaults.toml / .local/.env")
     parser.add_argument("--seed", help="overrides defaults.toml / .local/.env")
+    parser.add_argument(
+        "--init-image", type=Path, metavar="PATH",
+        help="a reference image to start from (image-to-image): its composition, "
+             "framing and palette steer the result; the prompt says what changes",
+    )
+    parser.add_argument(
+        "--init-creativity", type=float, default=0.6, metavar="FRACTION",
+        help="how far to depart from --init-image, 0 (keep it) to 1 (ignore it); default 0.6",
+    )
 
 
 def run(args: argparse.Namespace) -> None:
@@ -229,7 +263,8 @@ def run(args: argparse.Namespace) -> None:
     if not swarmui_url:
         sys.exit("AGFORGE_SWARMUI_URL missing from .local/.env")
     params = resolve_params(load_defaults(), env, args)
-    local_path = generate_image(swarmui_url, args.prompt, params)
+    extra = init_image_payload(args.init_image, args.init_creativity) if args.init_image else None
+    local_path = generate_image(swarmui_url, args.prompt, params, extra)
     print(f"local: {local_path}", file=sys.stderr)
     print(upload_and_presign(env, local_path, args.ttl))
 

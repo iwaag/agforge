@@ -36,4 +36,4 @@ def test_the_argue_role_reads_and_lists_toolsets_only():
 
     config, overlay = load_config(argue.SPEC.agents_config, Path("/nonexistent"))
     grant = resolve_role(config, overlay, "argue", check_available=False).allowed_tools
-    assert grant == "Read,Glob,Grep,Bash(agforge:*)"
+    assert grant == "Read,Glob,Grep,Bash(agforge:*),Bash(agrefs:*)"

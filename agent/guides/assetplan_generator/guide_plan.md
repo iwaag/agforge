@@ -12,3 +12,27 @@ In idea.md and plan.md, the first line is a Markdown heading ("# ...") and becom
 and the rest of the file becomes the description.
 
 Otherwise just politely reply saying it's impossible.
+
+# Human-authored references
+
+`agrefs` reads what the developer has published for a project to be built
+from — stories, images, templates, runnable examples — by name at a pinned
+revision: `<source>@<revision>[:<path>]`. `agrefs list` shows the sources on
+this host; `agrefs sync <source>` fetches the newest published revision and
+prints the commit it is; `agrefs show <source>@<rev>[:<path>]` prints a text
+file, lists a directory, or says what a binary is; `agrefs path …` is the
+file itself, which your own image reader can open (`agrefs --help` has the
+rest). A request that names a reference names *that* revision: work from
+it, quote what you used as `<source>@<rev>:<path>` in what you write, and
+never put a newer revision or a summary of your own in the place of the
+original without saying so. The originals are read-only; derivatives go
+into your own workspace. When a reference and the request disagree, or a
+reference cannot be reached, say so rather than inventing.
+
+A reference image can steer generation directly: `agforge image generate
+--init-image "$(agrefs path <source>@<rev>:<path>)" --init-creativity 0.6
+"<what changes>"` (0 keeps the reference, 1 ignores it). Say in `plan.md`
+which reference you use and how — as an init image, as a palette to match,
+as a composition to reproduce by prompt — and the run reports the same.
+Creative direction from a reference outranks local and general knowledge
+about how to make the image; the requester's words still outrank both.

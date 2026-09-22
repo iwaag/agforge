@@ -46,7 +46,7 @@ model = "antigravity/claude-sonnet-4-6"
 [roles.front]
 profile = "sonnet"
 requires = []
-allowed_tools = "Read,Write,Edit,Glob,Grep,Bash(agforge:*),Bash(agentchat:*)"
+allowed_tools = "Read,Write,Edit,Glob,Grep,Bash(agforge:*),Bash(agentchat:*),Bash(agrefs:*)"
 
 # The generator's grant: image/audio tooling, the shell verbs around it, and
 # file access inside its workspace. `agforge` and `generate.sh` are reached
@@ -70,6 +70,8 @@ allowed_tools = [
     "Bash(which:*)", "Bash(mc:*)", "Bash(git status:*)",
     "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
     "Bash(acestudio-cli:*)",
+    # Human-authored references, by name at a pinned revision (agag.refs).
+    "Bash(agrefs:*)",
     "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
 ]
 
@@ -79,4 +81,4 @@ allowed_tools = [
 [roles.argue]
 profile = "sonnet"
 requires = []
-allowed_tools = "Read,Glob,Grep,Bash(agforge:*)"
+allowed_tools = "Read,Glob,Grep,Bash(agforge:*),Bash(agrefs:*)"
