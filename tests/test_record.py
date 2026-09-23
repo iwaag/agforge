@@ -138,7 +138,7 @@ def test_opening_a_run_anchors_it_to_the_request_by_id():
     assert run.topic == f"assetrun-robot-{request.label}"
     assert parse_run(client.message(run.anchor_id)["content"]) == request.anchor_id
     bodies = client.posts(CHANNEL, run.topic)
-    assert bodies[0] == f"[selfnote][rootchat] {CHANNEL}/{TOPIC}"
+    assert bodies[0] == f"[selfnote][rootchat] {CHANNEL}/{TOPIC} #{request.anchor_id}"
     assert bodies[1] == f"[selfnote][assetrun] {request.anchor_id}"
     assert "selfnote" not in bodies[2] and "Post here to start it" in bodies[2]
 

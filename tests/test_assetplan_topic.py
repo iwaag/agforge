@@ -453,7 +453,7 @@ def test_registering_opens_the_run_topic_with_its_two_anchors(monkeypatch, tmp_p
     run_topic = client.run_topic()
     assert run_topic == f"assetrun-{STEM}-{request.label}"
     into_run_topic = [c[2] for c in calls if c[0] == "write" and c[1] == run_topic]
-    assert into_run_topic[0] == f"[selfnote][rootchat] {CHANNEL}/{TOPIC}"
+    assert into_run_topic[0] == f"[selfnote][rootchat] {CHANNEL}/{TOPIC} #{request.anchor_id}"
     assert into_run_topic[1] == f"[selfnote][assetrun] {request.anchor_id}"
     # Everything a reader ever sees of it is the third line.
     assert len(into_run_topic) == 3

@@ -453,8 +453,10 @@ def open_run(
     found = read_run(client, request.channel, topic, self_id, history=history)
     if found is not None:
         return found
+    # Anchored by the request's own id (robust_workflow p2 step 2): the run
+    # stays this request's after a retirement frees the plan topic's name.
     _post(client, request.channel, topic,
-          rootchat_note(Conversation(request.channel, request.topic)))
+          rootchat_note(Conversation(request.channel, request.topic, int(request.anchor_id))))
     if selection is not None and selection.explicit:
         _post(client, request.channel, topic, exec_note(
             selection.option,
