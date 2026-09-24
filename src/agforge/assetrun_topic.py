@@ -74,6 +74,7 @@ import json
 import shutil
 from pathlib import Path
 
+from agag.post import PROGRESS, REPORT, PostMeta, compose
 from agag.topics import (
     TopicResult,
     chatlog_path,
@@ -325,7 +326,7 @@ def serve(context) -> TopicResult:
     run = read_run(context.client, context.channel, context.topic, context.self_id,
                    history=context.history)
     if run is None:
-        return TopicResult([UNANCHORED_REPLY])
+        return TopicResult([UNANCHORED_REPLY], meta=PostMeta(intent=REPORT))
 
     context.step = "loading the request"
     request = request_of_run(context.client, run, context.self_id)
@@ -336,12 +337,12 @@ def serve(context) -> TopicResult:
         return TopicResult([
             f"the request this topic runs ({request_label(run.request_id)}) is gone; "
             "plan it again in an `assetplan-…` topic"
-        ])
+        ], meta=PostMeta(intent=REPORT))
     if not request.plan:
         return TopicResult([
             f"{request.label} has no plan recorded yet, so there is nothing to run; "
             f"ask for one in {request.topic}"
-        ])
+        ], meta=PostMeta(intent=REPORT))
     sections = [f'running "{request.title}"']
 
     context.step = "preparing the workspace"
@@ -357,7 +358,7 @@ def serve(context) -> TopicResult:
         return TopicResult([
             f"`{again}` was already collected and delivered; nothing more to do. "
             "Post what you want done differently to run this again."
-        ])
+        ], meta=PostMeta(intent=REPORT))
     workspace = prepare_workspace(request, run, collecting=collecting)
     collecting_id = watched_id(workspace) if collecting else ""
     if collecting:
@@ -395,7 +396,7 @@ def serve(context) -> TopicResult:
             f"queued as `{prompt_id}` and left with the notifier; {request.label} "
             "stays open and this run's next serving collects the outputs"
         )
-        return TopicResult(sections)
+        return TopicResult(sections, meta=PostMeta(intent=PROGRESS))  # a job is still rendering
 
     context.step = "packaging the result"
     (workspace / WATCHING_FILE).unlink(missing_ok=True)
@@ -428,7 +429,7 @@ def serve(context) -> TopicResult:
 
     context.step = "recording the outcome"
     sections.append(record_outcome(context.client, run, request, key, succeeded))
-    return TopicResult(sections)
+    return TopicResult(sections, meta=PostMeta(intent=REPORT))
 
 
 def record_outcome(
@@ -709,7 +710,8 @@ def deliver_to_origin(context, request: Request, delivery: str, mention: str = "
     """
     channel, topic = origin_of(request)
     trigger = mention or trigger_mention(context)
-    body = f"{trigger}\n\n{delivery}" if trigger else delivery
+    # The delivery is what the requester was waiting for: a report.
+    body = compose(f"{trigger}\n\n{delivery}" if trigger else delivery, PostMeta(intent=REPORT))
     try:
         # Under the name it wears **now**: a post under the bare name of a
         # topic that has been resolved opens a twin beside the conversation

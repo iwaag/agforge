@@ -299,7 +299,7 @@ def test_the_delivery_follows_the_request_through_a_rename(monkeypatch, tmp_path
     assert "delivered to FreeForge/retired-assetplan-x-a1" in calls[-1][2]
     # Under the name it wears **now**, and resolved, so the post lands in the
     # conversation instead of opening a twin beside it.
-    assert visible(calls, "✔ retired-assetplan-x-a1") == ["@**Developer**\n\nmade it"]
+    assert visible(calls, "✔ retired-assetplan-x-a1") == ["@**Developer**\n\nmade it\n\n`ag-post intent=report`"]
 
 
 # --- (b') result delivery ---------------------------------------------------
@@ -313,7 +313,7 @@ def test_an_empty_result_delivers_the_answer_text_to_the_origin(monkeypatch, tmp
 
     # Named, because a participant of a topic is served only when a post
     # names it: this is what gives whoever triggered the run their turn back.
-    assert visible(calls, ORIGIN_TOPIC) == ["@**Developer**\n\nmade it"]
+    assert visible(calls, ORIGIN_TOPIC) == ["@**Developer**\n\nmade it\n\n`ag-post intent=report`"]
     assert not any(c[0] == "upload" for c in calls)
     assert client.state_of("request") == record.REQUEST_DELIVERED
     assert client.state_of("run") == record.RUN_DELIVERED
@@ -339,7 +339,7 @@ def test_a_nonempty_result_ships_as_a_zip_url_and_records_the_key(monkeypatch, t
     # The durable half. The URL expires in an hour; whoever reads this later
     # re-signs the key through POST /api/resign.
     key = "files/2026-08-15/deadbeef.zip"
-    assert origin_posts[0].endswith(f"[S3KEY] {key}")
+    assert origin_posts[0].endswith(f"[S3KEY] {key}\n\n`ag-post intent=report`")
     # And it is the record, in both conversations — never only in a URL that
     # outlives itself by an hour.
     assert record.read_request(client, CHANNEL, ORIGIN_TOPIC, BOT_ID).results == (key,)
@@ -819,7 +819,7 @@ def test_a_generator_failure_names_its_step(monkeypatch, tmp_path):
 
     monkeypatch.setattr(assetrun_topic, "run_generator", explode)
     assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
-    assert calls[-1][2].endswith("failed during generator run: claude_code timed out")
+    assert calls[-1][2].endswith("failed during generator run: claude_code timed out\n\n`ag-post intent=report`")
 
 
 def test_a_lookup_failure_names_its_step(monkeypatch, tmp_path):
@@ -832,7 +832,7 @@ def test_a_lookup_failure_names_its_step(monkeypatch, tmp_path):
 
     monkeypatch.setattr(assetrun_topic, "request_of_run", explode)
     assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
-    assert calls[-1][2].endswith("failed during loading the request: the realm is unreachable")
+    assert calls[-1][2].endswith("failed during loading the request: the realm is unreachable\n\n`ag-post intent=report`")
 
 
 # --- (d) dispatch routing ---------------------------------------------------

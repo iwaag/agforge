@@ -339,7 +339,7 @@ def test_a_front_failure_names_its_step(monkeypatch, tmp_path):
     monkeypatch.setattr(assetplan_topic, "run_front", explode)
     assetplan_topic.handle_topic(Client(calls), CHANNEL, TOPIC)
     assert written(calls)[-1] == (
-        "@**Developer**\n\nfailed during front: claude_code timed out"
+        "@**Developer**\n\nfailed during front: claude_code timed out\n\n`ag-post intent=report`"
     )
 
 
