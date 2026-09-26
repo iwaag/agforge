@@ -22,6 +22,7 @@ from agag import topics
 from agforge import assetrun_topic, knowledge, record, toolsets, zulip_listener
 
 from realm import BOT_ID, HUMAN_ID, Realm
+from endmark import plain
 
 CHANNEL = "FreeForge"
 ORIGIN_TOPIC = "assetplan-x"
@@ -819,7 +820,7 @@ def test_a_generator_failure_names_its_step(monkeypatch, tmp_path):
 
     monkeypatch.setattr(assetrun_topic, "run_generator", explode)
     assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
-    assert calls[-1][2].endswith("failed during generator run: claude_code timed out\n\n`ag-post intent=report`")
+    assert plain(calls[-1][2]).endswith("failed during generator run: claude_code timed out\n\n`ag-post intent=report`")
 
 
 def test_a_lookup_failure_names_its_step(monkeypatch, tmp_path):
@@ -832,7 +833,7 @@ def test_a_lookup_failure_names_its_step(monkeypatch, tmp_path):
 
     monkeypatch.setattr(assetrun_topic, "request_of_run", explode)
     assetrun_topic.handle_assetrun(client, CHANNEL, client.topic)
-    assert calls[-1][2].endswith("failed during loading the request: the realm is unreachable\n\n`ag-post intent=report`")
+    assert plain(calls[-1][2]).endswith("failed during loading the request: the realm is unreachable\n\n`ag-post intent=report`")
 
 
 # --- (d) dispatch routing ---------------------------------------------------

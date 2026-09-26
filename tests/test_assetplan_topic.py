@@ -18,6 +18,7 @@ from agag.topics import GuideError, conversation_context
 from agforge import assetplan_topic, knowledge, record, toolsets
 
 from realm import BOT_ID, HUMAN_ID, Realm
+from endmark import plain
 
 CHANNEL = "FreeForge"
 TOPIC = "assetplan-20260814-120000-abc"
@@ -69,8 +70,9 @@ class Client(Realm):
 
 
 def written(calls):
-    """Just the message bodies, in the order they were posted."""
-    return [call[2] for call in calls if call[0] == "write"]
+    """Just the message bodies, in the order they were posted, without the
+    serving-end mark (`endmark`)."""
+    return [plain(call[2]) for call in calls if call[0] == "write"]
 
 
 def marked(answer: str) -> str:
@@ -156,7 +158,7 @@ def test_front_only_path_acks_answers_and_stops(monkeypatch, tmp_path):
         "whoami", "whoami", "history", "write", "front", "write", "history",
     ]
     assert calls[3][1:] == (TOPIC, assetplan_topic.SWEEP_ACK)
-    assert calls[5][1:] == (TOPIC, "@**Developer**\n\non it")
+    assert (calls[5][1], plain(calls[5][2])) == (TOPIC, "@**Developer**\n\non it")
     # The chatlog lands in this generation's front workspace.
     assert (gen_dir(tmp_path, 1, "front") / "chatlog.md").read_text() == (
         "[Developer] make me a bird\n"
@@ -393,7 +395,7 @@ def test_an_empty_topic_costs_no_agent_run(monkeypatch, tmp_path):
     wire(monkeypatch, tmp_path, calls)
     assetplan_topic.handle_topic(Client(calls, history=[]), CHANNEL, TOPIC)
     assert not any(call[0] in {"front", "generator"} for call in calls)
-    assert calls[-1][2] == assetplan_topic.EMPTY_REPLY
+    assert plain(calls[-1][2]) == assetplan_topic.EMPTY_REPLY
 
 
 # --- agforge's own chatlog rule --------------------------------------------
