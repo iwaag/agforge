@@ -79,9 +79,9 @@ def marked(answer: str) -> str:
     """A stub run's output under the reply contract (`agag.reply`): the
     answer inside an `ag-reply` mark after a line of the run's own, unless
     the test wrote the marks itself."""
-    if "```ag-reply" in answer:
+    if "<ag-reply" in answer:
         return answer
-    return f"thinking about it first.\n\n```ag-reply\n{answer}\n```"
+    return f"thinking about it first.\n\n<ag-reply>\n{answer}\n</ag-reply>"
 
 
 def wire(monkeypatch, tmp_path, calls, *, front="on it", generator="made it",
