@@ -111,12 +111,23 @@ def test_planning_again_replaces_the_document_and_keeps_the_history():
     assert PLAN in client.posts(CHANNEL, TOPIC)  # the old plan is still there
 
 
-def test_a_plan_that_would_be_truncated_is_refused_rather_than_half_recorded():
-    """Zulip accepts an over-long post and truncates it silently."""
+def test_a_plan_over_one_post_is_refused_rather_than_half_recorded():
+    """The client refuses a post longer than the server keeps (failsafe p4:
+    `MessageTooLong`, never a cut); the plan is not recorded and says why."""
+    from agag.zulip import MessageTooLong
+
     client = realm()
     request = record.ensure_request(client, CHANNEL, TOPIC, BOT_ID)
-    with pytest.raises(record.RecordError, match="truncates"):
-        record.record_plan(client, request, "# Big\n\n" + "x" * record.POST_LIMIT, [])
+    send = client.send_to_channel
+
+    def sized(channel, topic, content):
+        if len(content) > 1000:
+            raise MessageTooLong(len(content), 1000)
+        return send(channel, topic, content)
+
+    client.send_to_channel = sized
+    with pytest.raises(record.RecordError, match="keeps at most 1000"):
+        record.record_plan(client, request, "# Big\n\n" + "x" * 2000, [])
 
 
 def test_a_plan_that_is_not_a_document_is_refused():

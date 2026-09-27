@@ -83,12 +83,6 @@ from .anchor import (
 #: stay far below this.
 HISTORY_MESSAGES = 500
 
-#: Zulip accepts an over-long message and **truncates it silently**, appending
-#: `[message truncated]` — the post succeeds and the record is quietly wrong
-#: (measured in `advance_mediagen_study` p6 ex1, and the reason the ComfyUI
-#: notifier's callback is two lines). A plan that would be truncated is
-#: refused here instead, where the caller can say so.
-POST_LIMIT = 9000
 
 #: A request's states. The newest note wins, so a fresh attempt after a
 #: failure is never read through the old success verdict.
@@ -116,7 +110,6 @@ __all__ = [
     "ASSETPLAN_TOPIC_PREFIX",
     "ASSETRUN_TOPIC_PREFIX",
     "HISTORY_MESSAGES",
-    "POST_LIMIT",
     "REQUEST_ACCEPTED",
     "REQUEST_DELIVERED",
     "REQUEST_FAILED",
@@ -380,6 +373,10 @@ def request_of_run(client: ZulipClient, run: Run, self_id: int) -> Request | Non
 
 
 def _post(client: ZulipClient, channel: str, topic: str, text: str) -> int:
+    """One write of the record. A text longer than the server keeps is
+    refused by the client before it is sent (`agag.zulip.MessageTooLong`,
+    failsafe p4) and becomes a `RecordError` saying so — never a record
+    Zulip cut."""
     live = live_topic_name(client, channel, topic)
     try:
         return int(client.send_to_channel(channel, live, text))
@@ -404,11 +401,6 @@ def record_plan(
     document = plan.strip()
     if not document:
         raise RecordError("a plan with nothing in it is not a plan")
-    if len(document) > POST_LIMIT:
-        raise RecordError(
-            f"this plan is {len(document)} characters; Zulip truncates a post over about "
-            f"{POST_LIMIT} silently, so it is refused rather than half-recorded"
-        )
     split_document(document)  # a plan that is not a document is refused here
     doc_id = _post(client, request.channel, request.topic, document)
     _post(client, request.channel, request.topic, doc_note(doc_id))
