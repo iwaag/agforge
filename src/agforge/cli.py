@@ -31,12 +31,15 @@ __all__ = ["build_parser", "main"]
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agforge", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog="agforge", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
 
     toolsets = commands.add_parser(
         "toolsets", help="the toolsets this agforge offers",
-        description="List the toolsets in agent/toolsets/.",
+        description="List the toolsets in agent/toolsets/: one 'name, description' line each. A toolset "
+                    "says what a run here can run (image, video, music, speech, post-processing); what is "
+                    "known about doing it well is `agforge knowledge`. A read.",
     )
     toolsets.add_argument(
         "--list", action="store_true",
@@ -57,7 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="every source, its revision and its index rows",
         description="Print every configured source with its git revision and "
                     "the rows of its INDEX.md files, whole. Read it first, "
-                    "then `show` what looks relevant.",
+                    "then `show` what looks relevant. A `general` source says "
+                    "what a model or workflow is and what tests found; a "
+                    "`local` source says what runs on this host, how, and in "
+                    "which state: planned, experimenting, verified, failed or "
+                    "retired. Only `verified` has been run end to end here; "
+                    "anything else is a lead, and a plan that relies on it "
+                    "says so. Nothing is pre-selected or hidden.",
     )
     know_list.set_defaults(run=_run_knowledge_list, parser=know_list)
     know_show = know_actions.add_parser(

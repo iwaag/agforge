@@ -245,7 +245,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--init-image", type=Path, metavar="PATH",
         help="a reference image to start from (image-to-image): its composition, "
-             "framing and palette steer the result; the prompt says what changes",
+             "framing and palette steer the result; the prompt says what changes. A "
+             "published reference is at \"$(agrefs path <source>@<rev>:<path>)\"",
     )
     parser.add_argument(
         "--init-creativity", type=float, default=0.6, metavar="FRACTION",
