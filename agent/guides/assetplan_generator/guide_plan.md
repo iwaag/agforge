@@ -15,12 +15,6 @@ Otherwise just politely reply saying it's impossible.
 
 # Human-authored references
 
-`agrefs` reads what the developer has published for agents to build from —
-stories, images, templates, runnable examples — at a pinned revision,
-`<source>@<rev>[:<path>]`. `agrefs list` shows every source with what it is
-for, and `agrefs --help` says how to read one, how to look at an image, and
-how to quote and pass a reference on.
-
 A reference image can steer generation directly: `agforge image generate
 --init-image "$(agrefs path <source>@<rev>:<path>)" --init-creativity 0.6
 "<what changes>"` (0 keeps the reference, 1 ignores it). Say in `plan.md`

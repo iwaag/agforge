@@ -47,6 +47,7 @@ from agag.topics import (
     next_generation,
     next_record_path,
     prompt_with_guide,
+    shared_sections,
     serve_topic,
     topic_workspace as shared_topic_workspace,
 )
@@ -117,6 +118,12 @@ def guide(*parts: str) -> str:
     return shared_guide(GUIDES, *parts)
 
 
+#: pyagag's shared references pointer (`agag.topics.SHARED_SECTIONS`,
+#: `agent_guide` p2 step 3): every forge role holds `agrefs`; each guide keeps
+#: only what forge does with a reference.
+REFS = ("refs",)
+
+
 def is_ack(content: str) -> bool:
     """Our own transport noise, which is not conversation."""
     return content.startswith(ACK_PREFIX) or content == SWEEP_ACK
@@ -133,7 +140,7 @@ def front_prompt(bot_name: str, conversation: str = "") -> str:
     lines = [chatlog_placement(bot_name)]
     if conversation:
         lines += ["", conversation]
-    return prompt_with_guide(lines, guide("assetplan_front", "guide.md"), reply=True)
+    return prompt_with_guide(lines, guide("assetplan_front", "guide.md"), reply=True, shared=REFS)
 
 
 def _run(
@@ -160,7 +167,7 @@ def run_front(prompt: str, cwd: Path, selection: Selection | None = None) -> str
 def run_generator(cwd: Path, selection: Selection | None = None) -> str:
     return _run(
         "generator",
-        guide("assetplan_generator", "guide_plan.md"),
+        guide("assetplan_generator", "guide_plan.md") + "\n\n" + shared_sections(REFS),
         cwd,
         GENERATOR_TIMEOUT_SECONDS,
         selection,

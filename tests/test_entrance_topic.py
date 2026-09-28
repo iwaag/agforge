@@ -17,19 +17,22 @@ def test_the_prompt_places_the_chatlog_names_this_instance_and_carries_the_guide
     assert "chatlog" in prompt and "'Forge'" in prompt
     assert CHANNEL in prompt
     assert "agentchat topics" in prompt
-    assert "assetplan-" in prompt  # forge's own guide, not the built-in default
+    assert "assetplan-" in prompt  # forge's prefixes, filled into the default vocabulary
 
 
-def test_forge_has_its_own_guide_and_the_skeleton_prefers_it():
-    own = (SPEC.guides / "entrance_front" / "guide.md").read_text(encoding="utf-8").strip()
-    assert shared.entrance_guide(SPEC) == own
-    assert own != shared.default_guide(SPEC).strip()
-
-
-def test_the_guide_is_terse():
-    """Same register as the assetplan guides: a reader, not a manual."""
+def test_forge_needs_no_guide_of_its_own_for_the_entrance():
+    """agent_guide p2 step 3: forge's own entrance guide was pyagag's default
+    with its prefixes filled in, word for word. The file is gone and the
+    default vocabulary, under the shared fixed half, says the same."""
+    assert not (SPEC.guides / "entrance_front" / "guide.md").exists()
     text = shared.entrance_guide(SPEC)
-    assert len([line for line in text.splitlines() if line.strip()]) <= 10
+    assert text.endswith(shared.default_guide(SPEC))
+    assert "`assetplan-…` is a plan, `assetrun-…` is its run" in text
+
+
+def test_the_fixed_half_is_said_once():
+    text = shared.entrance_guide(SPEC)
+    assert text.count("posts your answer twice") == 1 and text.count("marked finished") == 1
 
 
 def test_the_guide_names_no_other_agents_routing():

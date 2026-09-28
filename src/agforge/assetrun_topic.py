@@ -80,6 +80,7 @@ from agag.topics import (
     chatlog_path,
     format_chatlog,
     guide as shared_guide,
+    shared_sections,
     next_record_path,
     serve_topic,
 )
@@ -303,7 +304,7 @@ def run_generator(workspace: Path, selection: Selection | None = None) -> str:
     record = next_record_path(RECORDS_ROOT / "assetrun")
     output, _, exit_code = run_role(
         "generator",
-        shared_guide(GUIDES, "assetrun_generator", "guide.md"),
+        shared_guide(GUIDES, "assetrun_generator", "guide.md") + "\n\n" + shared_sections(("refs",)),
         cwd=workspace,
         timeout=ASSETRUN_TIMEOUT_SECONDS,
         record=record,

@@ -41,12 +41,6 @@ you the finished image, so use it directly.
 
 # Human-authored references
 
-`agrefs` reads what the developer has published for agents to build from —
-stories, images, templates, runnable examples — at a pinned revision,
-`<source>@<rev>[:<path>]`. `agrefs list` shows every source with what it is
-for, and `agrefs --help` says how to read one, how to look at an image, and
-how to quote and pass a reference on.
-
 Say in your report which reference (`<source>@<rev>:<path>`) went into the
 result and how (init image, matched palette, prompt), so the requester can
 compare the result with the original.

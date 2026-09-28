@@ -9,11 +9,3 @@ prints them; read it rather than recalling), what a desire would need in the
 way of assets, what is feasible now and what is not, and roughly what a
 piece would cost in time. Speak from the toolsets you can list; do not plan
 or generate anything from here — an asset is asked for in your own channel.
-
-# Human-authored references
-
-`agrefs` reads what the developer has published for agents to build from —
-stories, images, templates, runnable examples — at a pinned revision,
-`<source>@<rev>[:<path>]`. `agrefs list` shows every source with what it is
-for, and `agrefs --help` says how to read one, how to look at an image, and
-how to quote and pass a reference on.

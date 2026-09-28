@@ -13,6 +13,7 @@ Same rule as the rest of the suite: nothing asserts what an agent said.
 import pytest
 from agag import topics
 from agag.reply import REPLY_GUIDE
+from agag.topics import shared_sections
 from agag.topics import GuideError, conversation_context
 
 from agforge import assetplan_topic, knowledge, record, toolsets
@@ -182,6 +183,7 @@ def test_the_front_prompt_carries_the_conversation_then_its_own_guide(monkeypatc
         "\n"
         + conversation_context("[Developer] make me a bird\n")
         + "\n\nFRONT GUIDE"
+        + f"\n\n{shared_sections(('refs',))}"
         + f"\n\n{REPLY_GUIDE}"
     )
     assert "make me a bird" in prompt
