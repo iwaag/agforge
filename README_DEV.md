@@ -1,5 +1,13 @@
 # agforge — developer/agent entry point
 
+**Retired 2026-10-14 (agdev `project_migration` p3).** forge's work moved to
+the workflow-editor project `forge` (Gitea `developer/pj-forge`): requests in
+`wf-forge.*`, tools extracted from this repository at `26dc1df`. The listener
+(`com.agdev.agforge-zulip`) and the request service (`com.agdev.agforge`) are
+stopped and their installed plists archived under `.local/archive/`. This
+checkout stays because comfynotify runs from its `.venv`; nothing here is
+maintained. Everything below describes the retired agent.
+
 The asset-generation workspace of pj-agdev: prompt in, generated image
 out, wrapped in an intent-level HTTP API. Accumulates know-how under
 "Easier Next Time" — whatever was painful this time should be one command
